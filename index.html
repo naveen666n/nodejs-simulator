@@ -1,1 +1,1680 @@
-<h1> Welcome to Nodejs Simulator</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js Runtime Simulator — Internal Execution Visualizer</title>
+<style>
+/* ============================================================
+   DESIGN TOKENS — observability-console dark theme
+   ============================================================ */
+:root{
+  --bg:#0a0d13;            /* page background */
+  --panel:#10151f;         /* panel surface */
+  --panel-2:#151c29;       /* nested surface */
+  --line:#1e2737;          /* hairline borders */
+  --line-2:#2a3650;
+  --text:#d7dee9;
+  --dim:#8593a8;
+  --faint:#5a6678;
+
+  /* component identity colors */
+  --c-req:#62d2e0;         /* incoming requests / network  */
+  --c-stack:#ffb454;       /* call stack                   */
+  --c-v8:#f3d56b;          /* v8 engine                    */
+  --c-loop:#3ddc91;        /* event loop                   */
+  --c-micro:#c792ea;       /* microtask queue              */
+  --c-tick:#ff5d7a;        /* nextTick queue               */
+  --c-cb:#7aa2f7;          /* callback (macrotask) queues  */
+  --c-pool:#56b6f9;        /* libuv thread pool            */
+  --c-db:#4ec9b0;          /* database                     */
+  --c-redis:#e3514f;       /* redis                        */
+  --c-heap:#8a7ff0;        /* memory heap                  */
+  --c-gc:#f78c6c;          /* garbage collector            */
+  --c-worker:#9ece6a;      /* worker threads               */
+  --c-stream:#73c2fb;      /* streams                      */
+  --bad:#ff5d7a;
+  --warn:#f3d56b;
+  --ok:#3ddc91;
+
+  --mono:ui-monospace,'SF Mono','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+  --sans:-apple-system,'Segoe UI',Inter,Roboto,'Helvetica Neue',sans-serif;
+  --r:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px}
+::selection{background:#27405f}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#243049;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+header{
+  display:flex;align-items:center;gap:14px;padding:8px 14px;
+  border-bottom:1px solid var(--line);background:#0c111a;flex:0 0 auto;
+}
+header .logo{display:flex;align-items:center;gap:9px;font-family:var(--mono)}
+header .logo .hex{width:20px;height:20px;color:var(--c-loop)}
+header .logo b{font-size:14px;letter-spacing:.2px}
+header .logo span{color:var(--dim);font-size:11px}
+.hgroup{display:flex;align-items:center;gap:6px}
+.hsep{width:1px;height:22px;background:var(--line)}
+.spacer{flex:1}
+
+button{
+  font-family:var(--mono);font-size:11.5px;color:var(--text);
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:6px;
+  padding:5px 10px;cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+  white-space:nowrap;
+}
+button:hover{background:#1c2536;border-color:#33476b}
+button:focus-visible{outline:2px solid var(--c-loop);outline-offset:1px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:#103326;border-color:#1d5c41;color:var(--ok)}
+button.primary:hover{background:#14402f}
+button.danger{color:var(--bad);border-color:#5c2433;background:#2a121b}
+button.toggle.on{background:#1c2c4a;border-color:#3b5b96;color:#9ec1ff}
+select{
+  font-family:var(--mono);font-size:11.5px;color:var(--text);
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:6px;padding:5px 7px;cursor:pointer;
+}
+label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-transform:uppercase;letter-spacing:.6px}
+
+/* ============================================================
+   SCENARIO STRIP
+   ============================================================ */
+#scenarios{
+  display:flex;gap:6px;padding:7px 14px;border-bottom:1px solid var(--line);
+  overflow-x:auto;flex:0 0 auto;background:#0b0f17;
+}
+#scenarios button{flex:0 0 auto;font-size:11px;padding:4px 9px;color:var(--dim)}
+#scenarios button .n{color:var(--faint);margin-right:5px}
+#scenarios button.active{color:var(--text);border-color:var(--c-loop);background:#10231b}
+#scenarios button.active .n{color:var(--c-loop)}
+
+/* ============================================================
+   MAIN GRID
+   ============================================================ */
+#main{flex:1;display:grid;min-height:0;gap:8px;padding:8px;
+  grid-template-columns:230px 1fr 1fr 290px;
+  grid-template-rows:minmax(0,5fr) minmax(0,4fr) minmax(0,128px);
+  grid-template-areas:
+    "left   center center right"
+    "left2  qa     qb     right2"
+    "bottom bottom bottom bottom";
+}
+.col{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+#colLeft{grid-area:left}#colLeft2{grid-area:left2}
+#colCenter{grid-area:center;display:grid;grid-template-columns:1fr 1.15fr;grid-template-rows:1fr;gap:8px}
+#colQA{grid-area:qa}#colQB{grid-area:qb}
+#colRight{grid-area:right}#colRight2{grid-area:right2}
+#bottomBar{grid-area:bottom;display:grid;grid-template-columns:300px 1fr 360px;gap:8px;min-height:0}
+
+.panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  display:flex;flex-direction:column;min-height:0;min-width:0;position:relative;
+  transition:border-color .25s, box-shadow .25s;
+}
+.panel.lit{border-color:var(--lit,#3ddc91);box-shadow:0 0 0 1px var(--lit,#3ddc91),0 0 18px -6px var(--lit,#3ddc91)}
+.panel>.ph{
+  display:flex;align-items:center;gap:7px;padding:6px 10px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);
+  flex:0 0 auto;
+}
+.panel>.ph .dot{width:7px;height:7px;border-radius:50%;background:var(--lit,#888);flex:0 0 auto}
+.panel>.ph .st{margin-left:auto;font-size:10px;color:var(--faint);text-transform:none;letter-spacing:.3px}
+.panel>.pb{flex:1;min-height:0;overflow:auto;padding:8px;position:relative}
+.grow{flex:1}
+
+/* ============================================================
+   INCOMING REQUESTS
+   ============================================================ */
+#reqList{display:flex;flex-direction:column;gap:4px}
+.req{
+  font-family:var(--mono);font-size:11px;border:1px solid #1d3a41;background:#0d1d22;color:var(--c-req);
+  border-radius:5px;padding:4px 8px;display:flex;justify-content:space-between;align-items:center;
+  animation:slideIn .25s ease;
+}
+.req .meta{color:var(--faint);font-size:10px}
+.req.processing{border-color:var(--c-req);background:#10262d;box-shadow:0 0 10px -4px var(--c-req)}
+.req.waiting-long{border-color:#5c2433;color:var(--warn)}
+.req-overflow{font-family:var(--mono);font-size:11px;color:var(--dim);padding:4px 8px;border:1px dashed var(--line-2);border-radius:5px;text-align:center}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+@keyframes flyOut{to{opacity:0;transform:translateX(14px)}}
+.gone{animation:flyOut .25s ease forwards}
+#reqStats{display:flex;gap:8px;padding:6px 10px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 auto}
+#reqStats b{color:var(--text)}
+
+/* ============================================================
+   NETWORK LAYER
+   ============================================================ */
+.lifecycle{display:flex;flex-direction:column;gap:5px}
+.lc-step{
+  display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--faint);
+  padding:3px 7px;border-radius:5px;border:1px solid transparent;transition:all .2s;
+}
+.lc-step .b{width:8px;height:8px;border-radius:2px;background:#222c3f;flex:0 0 auto;transition:all .2s}
+.lc-step.on{color:var(--c-req);border-color:#1d3a41;background:#0d1d22}
+.lc-step.on .b{background:var(--c-req);box-shadow:0 0 8px var(--c-req)}
+.lc-step.done{color:var(--dim)}
+.lc-step.done .b{background:#2c5a64}
+
+/* ============================================================
+   CALL STACK + V8
+   ============================================================ */
+#stackWrap{display:flex;flex-direction:column-reverse;gap:4px;justify-content:flex-start;min-height:100%}
+.frame{
+  font-family:var(--mono);font-size:11.5px;border:1px solid #4a3a1e;background:#1c150a;color:#e8c184;
+  border-radius:5px;padding:5px 9px;animation:pushIn .2s ease;position:relative;
+}
+.frame.top{border-color:var(--c-stack);background:#241a0b;color:var(--c-stack);box-shadow:0 0 12px -5px var(--c-stack)}
+.frame.top::after{content:'◀ executing';position:absolute;right:8px;color:#8a6a35;font-size:9px;top:50%;transform:translateY(-50%)}
+.frame.blocked{border-color:var(--bad);color:var(--bad);background:#2a121b}
+.frame.blocked::after{content:'◀ BLOCKING';color:var(--bad)}
+@keyframes pushIn{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes popOut{to{opacity:0;transform:translateY(-10px) scale(.96)}}
+.frame.popping{animation:popOut .18s ease forwards}
+.stack-base{font-family:var(--mono);font-size:9.5px;color:var(--faint);text-align:center;border-top:1px dashed var(--line-2);padding-top:4px;letter-spacing:1px}
+
+#v8stages{display:flex;gap:5px;padding:8px}
+.v8s{
+  flex:1;text-align:center;font-family:var(--mono);font-size:10px;color:var(--faint);
+  border:1px solid var(--line);border-radius:5px;padding:6px 2px;transition:all .2s;background:var(--panel-2);
+}
+.v8s.on{color:#1a1405;background:var(--c-v8);border-color:var(--c-v8);font-weight:700;box-shadow:0 0 14px -4px var(--c-v8)}
+#v8note{font-family:var(--mono);font-size:10px;color:var(--dim);padding:0 9px 8px;min-height:16px}
+
+/* ============================================================
+   EVENT LOOP
+   ============================================================ */
+#loopWrap{display:flex;align-items:center;gap:10px;height:100%}
+#loopSvg{flex:0 0 auto}
+.seg{fill:none;stroke:#1c2434;stroke-width:17;transition:stroke .25s;cursor:default}
+.seg.on{stroke:var(--c-loop);filter:drop-shadow(0 0 6px var(--c-loop))}
+.seg.blocked{stroke:var(--bad);filter:drop-shadow(0 0 6px var(--bad))}
+.seglbl{font-family:var(--mono);font-size:7.5px;fill:var(--faint);text-anchor:middle}
+.seglbl.on{fill:var(--c-loop);font-weight:700}
+#needle{transition:transform .45s cubic-bezier(.4,.1,.2,1);transform-origin:110px 95px}
+#loopCenterTxt{font-family:var(--mono);font-size:9px;fill:var(--dim);text-anchor:middle}
+#loopTickTxt{font-family:var(--mono);font-size:12px;fill:var(--c-loop);text-anchor:middle;font-weight:700}
+#loopPhases{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.phrow{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;color:var(--faint);padding:2.5px 7px;border-radius:4px;border:1px solid transparent}
+.phrow .num{color:var(--faint);width:10px}
+.phrow.on{color:var(--c-loop);background:#0d2017;border-color:#1d5c41}
+.phrow.blocked{color:var(--bad);background:#2a121b;border-color:#5c2433}
+.phrow .q{margin-left:auto;color:var(--dim);font-size:9.5px}
+#loopState{font-family:var(--mono);font-size:10px;padding:5px 10px;border-top:1px solid var(--line);color:var(--dim);flex:0 0 auto;display:flex;gap:10px}
+#loopState .blockedTag{color:var(--bad);display:none;font-weight:700;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.35}}
+
+/* ============================================================
+   QUEUES (nextTick / micro / macro)
+   ============================================================ */
+.qbody{display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start}
+.task{
+  font-family:var(--mono);font-size:10.5px;border-radius:5px;padding:3px 8px;border:1px solid;
+  animation:slideIn .2s ease;white-space:nowrap;
+}
+.task.tick{color:var(--c-tick);border-color:#5c2433;background:#220e15}
+.task.micro{color:var(--c-micro);border-color:#3f2a52;background:#19101f}
+.task.macro{color:var(--c-cb);border-color:#26375c;background:#0f1626}
+.task.running{filter:brightness(1.5);box-shadow:0 0 10px -3px currentColor}
+.qempty{font-family:var(--mono);font-size:10px;color:var(--faint);font-style:italic}
+
+/* ============================================================
+   THREAD POOL / WORKERS
+   ============================================================ */
+.threads{display:flex;flex-direction:column;gap:5px}
+.thread{
+  display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
+  border:1px solid var(--line);border-radius:5px;padding:5px 8px;color:var(--dim);transition:all .2s;background:var(--panel-2);
+}
+.thread .lamp{width:8px;height:8px;border-radius:50%;background:#26314a;flex:0 0 auto}
+.thread .job{margin-left:auto;color:var(--faint);font-size:10px}
+.thread.busy{border-color:var(--c-pool);color:var(--c-pool);background:#0c1a28}
+.thread.busy .lamp{background:var(--c-pool);box-shadow:0 0 8px var(--c-pool);animation:blink 0.8s infinite}
+.thread.busy .job{color:var(--c-pool)}
+.thread.wbusy{border-color:var(--c-worker);color:var(--c-worker);background:#13200e}
+.thread.wbusy .lamp{background:var(--c-worker);box-shadow:0 0 8px var(--c-worker);animation:blink .8s infinite}
+.thread.wbusy .job{color:var(--c-worker)}
+.progress{height:3px;background:#1a2335;border-radius:2px;overflow:hidden;margin-top:3px}
+.progress>i{display:block;height:100%;background:var(--c-pool);width:0%;transition:width .2s linear}
+
+/* ============================================================
+   DB / REDIS
+   ============================================================ */
+.svcrow{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;padding:4px 0;color:var(--dim)}
+.svcrow .lamp{width:8px;height:8px;border-radius:50%;background:#26314a}
+.svcrow.on{color:var(--c-db)}
+.svcrow.on .lamp{background:var(--c-db);box-shadow:0 0 8px var(--c-db);animation:blink .7s infinite}
+.latbar{height:4px;background:#1a2335;border-radius:2px;overflow:hidden;margin:4px 0 8px}
+.latbar>i{display:block;height:100%;width:0%;background:var(--c-db);transition:width .1s linear}
+#redisBody .latbar>i{background:var(--c-redis)}
+.kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);padding:2px 0}
+.kv b{color:var(--text)}
+.hitflash{animation:hitf .6s ease}
+@keyframes hitf{0%{background:#10231b}100%{background:transparent}}
+.missflash{animation:missf .6s ease}
+@keyframes missf{0%{background:#2a121b}100%{background:transparent}}
+
+/* ============================================================
+   STREAMS
+   ============================================================ */
+#streamLane{display:flex;align-items:center;gap:6px;padding:6px 2px;position:relative}
+.snode{flex:1;text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--dim);border:1px solid var(--line-2);border-radius:5px;padding:7px 2px;background:var(--panel-2);transition:all .2s}
+.snode.on{color:var(--c-stream);border-color:var(--c-stream);box-shadow:0 0 10px -4px var(--c-stream)}
+.sarrow{color:var(--faint);font-size:11px}
+.chunk{position:absolute;width:9px;height:9px;border-radius:2px;background:var(--c-stream);top:50%;left:0;transform:translateY(-50%);box-shadow:0 0 8px var(--c-stream);opacity:0}
+@keyframes chunkflow{0%{left:6%;opacity:0}10%{opacity:1}90%{opacity:1}100%{left:92%;opacity:0}}
+#streamMeta{font-family:var(--mono);font-size:10px;color:var(--dim);padding:0 2px}
+
+/* ============================================================
+   HEAP + GC
+   ============================================================ */
+#heapGrid{display:grid;grid-template-columns:repeat(20,1fr);gap:2px}
+.cell{aspect-ratio:1;border-radius:2px;background:#161e2e;transition:all .25s}
+.cell.obj{background:#8a7ff0}.cell.arr{background:#5b8af5}.cell.buf{background:#46b3a9}
+.cell.leak{background:#c4426b}
+.cell.marked{outline:1.5px solid #f78c6c;outline-offset:-1.5px}
+.cell.sweeping{background:#3a2a20;outline:none}
+#heapBar{height:6px;background:#1a2335;border-radius:3px;overflow:hidden;margin-top:7px}
+#heapBar>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--c-heap),#c4426b);transition:width .25s}
+#heapKv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px}
+#gcPhases{display:flex;gap:4px;margin-top:7px}
+.gcp{flex:1;text-align:center;font-family:var(--mono);font-size:9px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:3px 0;transition:all .2s}
+.gcp.on{color:#1a0d06;background:var(--c-gc);border-color:var(--c-gc);font-weight:700}
+
+/* ============================================================
+   BOTTOM BAR: education / timeline / metrics
+   ============================================================ */
+#eduBody{font-family:var(--mono);font-size:10.5px;line-height:1.5;overflow:auto}
+#eduBody .erow{display:grid;grid-template-columns:78px 1fr;gap:6px;padding:1.5px 0}
+#eduBody .ek{color:var(--faint);text-transform:uppercase;font-size:9px;letter-spacing:.5px;padding-top:1px}
+#eduBody .ev{color:var(--text)}
+#eduBody .ev.comp{color:var(--c-loop)}
+#eduBody .ev.impact{color:var(--warn)}
+
+#tlTrack{position:relative;height:100%;overflow-x:auto;overflow-y:hidden;display:flex;align-items:stretch}
+#tlInner{position:relative;min-width:100%;height:100%}
+.tlmark{position:absolute;top:6px;bottom:18px;width:1px;background:var(--line-2)}
+.tlmark .tlbl{position:absolute;top:0;left:4px;font-family:var(--mono);font-size:9px;color:var(--text);white-space:nowrap;transform-origin:left;writing-mode:vertical-rl;font-size:8.5px;max-height:100%;overflow:hidden;color:var(--dim)}
+.tlmark.hot{background:var(--c-loop)}
+.tlmark.hot .tlbl{color:var(--c-loop)}
+.tltime{position:absolute;bottom:2px;left:3px;font-family:var(--mono);font-size:8.5px;color:var(--faint)}
+#tlAxis{position:absolute;left:0;right:0;bottom:16px;height:1px;background:var(--line)}
+
+#metricsGrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;height:100%;align-content:stretch}
+.metric{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.metric .mk{font-family:var(--mono);font-size:8.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;overflow:hidden}
+.metric .mv{font-family:var(--mono);font-size:15px;color:var(--text);font-weight:600;white-space:nowrap}
+.metric .mv small{font-size:9px;color:var(--dim);font-weight:400}
+.metric.alert .mv{color:var(--bad)}
+.metric.warn .mv{color:var(--warn)}
+
+/* ============================================================
+   INTERNALS LOG (advanced mode)
+   ============================================================ */
+#internals{display:none;border-top:1px solid var(--line);flex:0 0 110px;background:#080b11;overflow:auto;padding:6px 12px;font-family:var(--mono);font-size:10px;line-height:1.6}
+body.advanced #internals{display:block}
+#internals .il{color:var(--dim);white-space:pre}
+#internals .il .t{color:var(--faint)}
+#internals .il .tag{color:var(--c-loop)}
+#internals .il.uv .tag{color:var(--c-pool)}
+#internals .il.v8 .tag{color:var(--c-v8)}
+#internals .il.mem .tag{color:var(--c-heap)}
+#internals .il.q .tag{color:var(--c-micro)}
+
+/* flying token between panels */
+.fly{
+  position:fixed;z-index:99;font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:5px;
+  pointer-events:none;border:1px solid;transition:all .55s cubic-bezier(.4,.1,.25,1);white-space:nowrap;
+}
+
+/* crash banner */
+#crash{
+  position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:200;
+  background:rgba(8,4,8,.82);backdrop-filter:blur(2px);
+}
+#crash .box{border:1px solid var(--bad);background:#160a10;border-radius:10px;padding:26px 34px;text-align:center;font-family:var(--mono)}
+#crash h2{color:var(--bad);font-size:16px;margin-bottom:10px}
+#crash pre{color:var(--dim);font-size:11px;text-align:left;line-height:1.6;margin-bottom:16px}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+@media (max-width:1100px){
+  #app{height:auto}
+  #main{grid-template-columns:1fr 1fr;grid-template-rows:auto;grid-template-areas:
+    "left right" "center center" "qa qb" "left2 right2" "bottom bottom"}
+  #colCenter{grid-template-columns:1fr}
+  #bottomBar{grid-template-columns:1fr;height:auto}
+  .panel{min-height:170px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= HEADER ================= -->
+  <header>
+    <div class="logo">
+      <svg class="hex" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.85L2.6 7.1v9.8L12 22.15l9.4-5.25V7.1L12 1.85zm0 2.3l7.4 4.13v7.44L12 19.85l-7.4-4.13V8.28L12 4.15z"/><circle cx="12" cy="12" r="3.4"/></svg>
+      <b>node:runtime-simulator</b><span>v1.0 · libuv + V8 internal execution visualizer</span>
+    </div>
+    <div class="hsep"></div>
+    <div class="hgroup">
+      <label class="hlabel">Load</label>
+      <button onclick="Req.spawn(1)">+1 req</button>
+      <button onclick="Req.spawn(10)">+10</button>
+      <button onclick="Req.spawn(100)">+100</button>
+      <button onclick="Req.spawn(1000)">+1000</button>
+    </div>
+    <div class="hsep"></div>
+    <div class="hgroup">
+      <label class="hlabel">Speed</label>
+      <select id="speedSel" onchange="Sim.speed=parseFloat(this.value)">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <button id="pauseBtn" onclick="Sim.togglePause()">⏸ pause</button>
+      <button class="danger" onclick="Sim.reset()">↺ reset</button>
+    </div>
+    <div class="spacer"></div>
+    <button id="advBtn" class="toggle" onclick="toggleAdvanced()">⚙ show internal details</button>
+  </header>
+
+  <!-- ================= SCENARIO STRIP ================= -->
+  <div id="scenarios"></div>
+
+  <!-- ================= MAIN GRID ================= -->
+  <div id="main">
+
+    <!-- LEFT: requests -->
+    <div class="col" id="colLeft">
+      <div class="panel grow" id="pReq" style="--lit:var(--c-req)">
+        <div class="ph"><span class="dot"></span>Incoming Requests<span class="st" id="reqHdr">idle</span></div>
+        <div class="pb"><div id="reqList"></div></div>
+        <div id="reqStats">
+          <span>queued <b id="stQueued">0</b></span>
+          <span>active <b id="stActive">0</b></span>
+          <span>done <b id="stDone">0</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEFT2: network -->
+    <div class="col" id="colLeft2">
+      <div class="panel grow" id="pNet" style="--lit:var(--c-req)">
+        <div class="ph"><span class="dot"></span>Network Layer<span class="st" id="netSt">socket closed</span></div>
+        <div class="pb">
+          <div class="lifecycle" id="netLC">
+            <div class="lc-step" data-lc="syn"><span class="b"></span>TCP SYN / SYN-ACK / ACK</div>
+            <div class="lc-step" data-lc="est"><span class="b"></span>Socket ESTABLISHED</div>
+            <div class="lc-step" data-lc="req"><span class="b"></span>HTTP request bytes in</div>
+            <div class="lc-step" data-lc="parse"><span class="b"></span>llhttp parses headers/body</div>
+            <div class="lc-step" data-lc="res"><span class="b"></span>HTTP response bytes out</div>
+            <div class="lc-step" data-lc="fin"><span class="b"></span>FIN / keep-alive</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: stack+v8 | event loop -->
+    <div id="colCenter">
+      <div class="col">
+        <div class="panel" style="--lit:var(--c-v8);flex:0 0 auto" id="pV8">
+          <div class="ph"><span class="dot"></span>V8 Engine<span class="st" id="v8St">idle</span></div>
+          <div id="v8stages">
+            <div class="v8s" data-s="parse">PARSE<br>→ AST</div>
+            <div class="v8s" data-s="compile">IGNITION<br>→ bytecode</div>
+            <div class="v8s" data-s="optimize">TURBOFAN<br>→ machine code</div>
+            <div class="v8s" data-s="execute">EXECUTE</div>
+          </div>
+          <div id="v8note"></div>
+        </div>
+        <div class="panel grow" style="--lit:var(--c-stack)" id="pStack">
+          <div class="ph"><span class="dot"></span>Call Stack<span class="st" id="stackSt">empty</span></div>
+          <div class="pb"><div id="stackWrap"></div></div>
+          <div class="stack-base">▲ LIFO — one stack, one thread ▲</div>
+        </div>
+      </div>
+
+      <div class="panel" style="--lit:var(--c-loop)" id="pLoop">
+        <div class="ph"><span class="dot"></span>Event Loop (libuv)<span class="st" id="loopIter">tick 0</span></div>
+        <div class="pb">
+          <div id="loopWrap">
+            <svg id="loopSvg" width="220" height="190" viewBox="0 0 220 190"></svg>
+            <div id="loopPhases">
+              <div class="phrow" data-ph="timers"><span class="num">1</span>timers<span class="q" id="q-timers">0</span></div>
+              <div class="phrow" data-ph="pending"><span class="num">2</span>pending callbacks<span class="q" id="q-pending">0</span></div>
+              <div class="phrow" data-ph="idle"><span class="num">3</span>idle / prepare<span class="q">—</span></div>
+              <div class="phrow" data-ph="poll"><span class="num">4</span>poll (I/O)<span class="q" id="q-poll">0</span></div>
+              <div class="phrow" data-ph="check"><span class="num">5</span>check (setImmediate)<span class="q" id="q-check">0</span></div>
+              <div class="phrow" data-ph="close"><span class="num">6</span>close callbacks<span class="q" id="q-close">0</span></div>
+            </div>
+          </div>
+        </div>
+        <div id="loopState">
+          <span id="loopPhaseTxt">phase: —</span>
+          <span class="blockedTag" id="blockedTag">■ EVENT LOOP BLOCKED</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- QA: nextTick + microtasks -->
+    <div class="col" id="colQA">
+      <div class="panel grow" style="--lit:var(--c-tick)" id="pTick">
+        <div class="ph"><span class="dot"></span>process.nextTick Queue<span class="st">priority 1 — drained first</span></div>
+        <div class="pb"><div class="qbody" id="tickQ"><span class="qempty">empty</span></div></div>
+      </div>
+      <div class="panel grow" style="--lit:var(--c-micro)" id="pMicro">
+        <div class="ph"><span class="dot"></span>Microtask Queue<span class="st">priority 2 — Promise / queueMicrotask</span></div>
+        <div class="pb"><div class="qbody" id="microQ"><span class="qempty">empty</span></div></div>
+      </div>
+    </div>
+
+    <!-- QB: macrotask queues -->
+    <div class="col" id="colQB">
+      <div class="panel grow" style="--lit:var(--c-cb)" id="pMacro">
+        <div class="ph"><span class="dot"></span>Callback Queues (per phase)<span class="st">macrotasks</span></div>
+        <div class="pb"><div class="qbody" id="macroQ"><span class="qempty">empty</span></div></div>
+      </div>
+      <div class="panel" style="--lit:var(--c-stream);flex:0 0 auto" id="pStream">
+        <div class="ph"><span class="dot"></span>Streams<span class="st" id="streamSt">idle</span></div>
+        <div class="pb">
+          <div id="streamLane">
+            <div class="snode" data-sn="r">Readable<br>fs / socket</div><span class="sarrow">→</span>
+            <div class="snode" data-sn="t">Transform<br>gzip / parse</div><span class="sarrow">→</span>
+            <div class="snode" data-sn="w">Writable<br>socket / fs</div>
+          </div>
+          <div id="streamMeta">backpressure: highWaterMark 16KB</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: thread pool + workers -->
+    <div class="col" id="colRight">
+      <div class="panel" style="--lit:var(--c-pool)" id="pPool">
+        <div class="ph"><span class="dot"></span>libuv Thread Pool<span class="st">UV_THREADPOOL_SIZE=4</span></div>
+        <div class="pb">
+          <div class="threads" id="poolThreads"></div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-top:7px">
+            handles: fs · dns.lookup · crypto.pbkdf2 · zlib<br>
+            <span style="color:var(--dim)">⚠ network sockets do NOT use this pool</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel grow" style="--lit:var(--c-worker)" id="pWorker">
+        <div class="ph"><span class="dot"></span>Worker Threads<span class="st">isolated V8 + loop each</span></div>
+        <div class="pb"><div class="threads" id="workerThreads"></div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT2: db + redis + heap -->
+    <div class="col" id="colRight2">
+      <div class="panel" style="--lit:var(--c-redis)" id="pRedis">
+        <div class="ph"><span class="dot"></span>Redis Cache<span class="st">~0.3 ms RTT</span></div>
+        <div class="pb" id="redisBody">
+          <div class="svcrow" id="redisRow"><span class="lamp"></span><span id="redisTxt">idle</span></div>
+          <div class="latbar"><i id="redisLat"></i></div>
+          <div class="kv"><span>hits</span><b id="redisHits">0</b></div>
+          <div class="kv"><span>misses</span><b id="redisMiss">0</b></div>
+        </div>
+      </div>
+      <div class="panel" style="--lit:var(--c-db)" id="pDb">
+        <div class="ph"><span class="dot"></span>Database<span class="st" id="dbSt">~20 ms RTT</span></div>
+        <div class="pb">
+          <div class="svcrow" id="dbRow"><span class="lamp"></span><span id="dbTxt">idle — pool: 10 sockets</span></div>
+          <div class="latbar"><i id="dbLat"></i></div>
+          <div class="kv"><span>protocol</span><b id="dbProto">TCP wire protocol</b></div>
+          <div class="kv"><span>queries</span><b id="dbCount">0</b></div>
+        </div>
+      </div>
+      <div class="panel grow" style="--lit:var(--c-heap)" id="pHeap">
+        <div class="ph"><span class="dot"></span>Memory Heap + GC<span class="st" id="gcSt">gc idle</span></div>
+        <div class="pb">
+          <div id="heapGrid"></div>
+          <div id="heapBar"><i></i></div>
+          <div id="heapKv"><span id="heapUsed">0 MB / 64 MB</span><span id="heapPct">0%</span></div>
+          <div id="gcPhases">
+            <div class="gcp" data-g="mark">MARK</div>
+            <div class="gcp" data-g="sweep">SWEEP</div>
+            <div class="gcp" data-g="compact">COMPACT</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM -->
+    <div id="bottomBar">
+      <div class="panel" style="--lit:var(--c-v8)" id="pEdu">
+        <div class="ph"><span class="dot"></span>Educational Mode<span class="st">step explainer</span></div>
+        <div class="pb" id="eduBody">
+          <div class="erow"><span class="ek">step</span><span class="ev" id="eStep">Pick a scenario above to begin.</span></div>
+          <div class="erow"><span class="ek">description</span><span class="ev" id="eDesc">Each animation step explains what Node.js is doing and why.</span></div>
+          <div class="erow"><span class="ek">why</span><span class="ev" id="eWhy">—</span></div>
+          <div class="erow"><span class="ek">component</span><span class="ev comp" id="eComp">—</span></div>
+          <div class="erow"><span class="ek">impact</span><span class="ev impact" id="eImpact">—</span></div>
+        </div>
+      </div>
+      <div class="panel" id="pTl">
+        <div class="ph"><span class="dot" style="--lit:var(--c-loop)"></span>Timeline<span class="st" id="tlSt">0 ms</span></div>
+        <div class="pb" style="padding:0 6px">
+          <div id="tlTrack"><div id="tlInner"><div id="tlAxis"></div></div></div>
+        </div>
+      </div>
+      <div class="panel" id="pMetrics">
+        <div class="ph"><span class="dot" style="--lit:var(--c-pool)"></span>Performance Metrics<span class="st">live</span></div>
+        <div class="pb" style="padding:6px">
+          <div id="metricsGrid">
+            <div class="metric" id="mLag"><span class="mk">loop lag</span><span class="mv">0<small> ms</small></span></div>
+            <div class="metric" id="mActive"><span class="mk">active req</span><span class="mv">0</span></div>
+            <div class="metric" id="mQueue"><span class="mk">queue len</span><span class="mv">0</span></div>
+            <div class="metric" id="mHeap"><span class="mk">heap</span><span class="mv">0<small>%</small></span></div>
+            <div class="metric" id="mPool"><span class="mk">pool busy</span><span class="mv">0<small>/4</small></span></div>
+            <div class="metric" id="mCpu"><span class="mk">cpu</span><span class="mv">2<small>%</small></span></div>
+            <div class="metric" id="mResp"><span class="mk">resp time</span><span class="mv">—<small> ms</small></span></div>
+            <div class="metric" id="mThru"><span class="mk">throughput</span><span class="mv">0<small> r/s</small></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- internals log -->
+  <div id="internals"></div>
+</div>
+
+<div id="crash">
+  <div class="box">
+    <h2>FATAL ERROR: Reached heap limit</h2>
+    <pre id="crashTxt"></pre>
+    <button onclick="Sim.reset();document.getElementById('crash').style.display='none'">restart process</button>
+  </div>
+</div>
+<script>
+/* ============================================================================
+   NODE.JS RUNTIME SIMULATOR — core engine
+   Architecture:
+     Sim        — scheduler: sequencing, speed, pause, abort, virtual clock
+     Edu        — educational explainer panel
+     Internals  — advanced low-level log
+     Timeline   — virtual-time event marks
+     Metrics    — live dashboard
+     Components — Req, Net, Stack, V8, Loop, Q (tick/micro/macro), Pool,
+                  Workers, Db, Redis, Heap, GC, Streams
+     Scenarios  — declarative async functions composed of `await step(...)`
+   ============================================================================ */
+'use strict';
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+/* ----------------------------------------------------------------------------
+   Sim — scheduler with virtual clock (1 virtual ms ≈ 55 real ms at 1×)
+---------------------------------------------------------------------------- */
+const Sim = {
+  speed: 1, paused: false, runId: 0, vtime: 0, running: false,
+  _gate: null,
+
+  // real-time delay scaled by speed; respects pause + abort
+  async wait(ms){
+    const id = this.runId;
+    let left = ms / this.speed;
+    while (left > 0){
+      if (id !== this.runId) throw new Error('aborted');
+      if (this.paused){ await this._pauseGate(); continue; }
+      const slice = Math.min(left, 50);
+      await new Promise(r => setTimeout(r, slice));
+      left -= slice;
+    }
+    if (id !== this.runId) throw new Error('aborted');
+  },
+  _pauseGate(){ return new Promise(r => { this._gate = r; }); },
+  togglePause(){
+    this.paused = !this.paused;
+    $('#pauseBtn').textContent = this.paused ? '▶ resume' : '⏸ pause';
+    if (!this.paused && this._gate){ this._gate(); this._gate = null; }
+  },
+  clock(ms){ this.vtime += ms; Timeline.tick(this.vtime); },
+
+  async runScenario(name, fn, btn){
+    this.runId++;                       // abort anything in flight
+    await new Promise(r=>setTimeout(r,60));
+    softReset();
+    $$('#scenarios button').forEach(b=>b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    this.running = true; this.vtime = 0; Timeline.reset();
+    const id = this.runId;
+    try { await fn(); Edu.show({step:'Scenario complete', desc:`"${name}" finished. Replay it or pick another scenario.`, why:'—', comp:'—', impact:'—'}); }
+    catch(e){ if (e.message!=='aborted') console.error(e); }
+    if (id===this.runId) this.running = false;
+  },
+  reset(){ this.runId++; this.paused=false; $('#pauseBtn').textContent='⏸ pause'; if(this._gate){this._gate();this._gate=null;} hardReset(); }
+};
+
+/* convenience: show edu card, log, advance virtual clock, real-wait */
+async function step(o){
+  if (o.edu) Edu.show(o.edu);
+  if (o.log) Internals.log(o.log.tag||'loop', o.log.msg);
+  if (o.t !== undefined) Timeline.mark(o.t, o.tl || (o.edu&&o.edu.step) || '');
+  if (o.clock) Sim.clock(o.clock);
+  await Sim.wait(o.ms ?? 700);
+}
+
+/* ----------------------------------------------------------------------------
+   Edu / Internals / Timeline / Metrics
+---------------------------------------------------------------------------- */
+const Edu = {
+  show({step='—', desc='—', why='—', comp='—', impact='—'}){
+    $('#eStep').textContent=step; $('#eDesc').textContent=desc;
+    $('#eWhy').textContent=why;  $('#eComp').textContent=comp;
+    $('#eImpact').textContent=impact;
+    $('#pEdu').classList.add('lit'); setTimeout(()=>$('#pEdu').classList.remove('lit'),300);
+  }
+};
+
+const Internals = {
+  el: $('#internals'),
+  log(tag, msg){
+    const d=document.createElement('div'); d.className='il '+tag;
+    d.innerHTML=`<span class="t">[${String(Sim.vtime).padStart(5,' ')}ms]</span> <span class="tag">${tag.padEnd(4,' ')}</span> ${msg}`;
+    this.el.appendChild(d); this.el.scrollTop=this.el.scrollHeight;
+    while(this.el.children.length>250) this.el.firstChild.remove();
+  },
+  clear(){ this.el.innerHTML=''; }
+};
+
+const Timeline = {
+  pxPerMs: 14, inner: $('#tlInner'),
+  reset(){ this.inner.querySelectorAll('.tlmark').forEach(m=>m.remove()); this.inner.style.minWidth='100%'; $('#tlSt').textContent='0 ms'; },
+  tick(t){ $('#tlSt').textContent = t.toFixed(1)+' ms (virtual)'; },
+  mark(t,label,hot=false){
+    const m=document.createElement('div'); m.className='tlmark'+(hot?' hot':'');
+    const x=t*this.pxPerMs+8; m.style.left=x+'px';
+    m.innerHTML=`<span class="tlbl">${label}</span><span class="tltime">${t}ms</span>`;
+    this.inner.appendChild(m);
+    this.inner.style.minWidth=(x+90)+'px';
+    $('#tlTrack').scrollLeft = 1e9;
+  }
+};
+
+const Metrics = {
+  vals:{lag:0,active:0,queue:0,heap:0,pool:0,cpu:2,resp:'—',thru:0},
+  set(k,v){ this.vals[k]=v; this.render(k); },
+  render(k){
+    const v=this.vals;
+    const map={
+      lag:  [$('#mLag'),  `${v.lag}<small> ms</small>`,  v.lag>50?'alert':v.lag>10?'warn':''],
+      active:[$('#mActive'),`${v.active}`, v.active>100?'warn':''],
+      queue:[$('#mQueue'),`${v.queue}`, v.queue>50?'alert':v.queue>10?'warn':''],
+      heap: [$('#mHeap'), `${v.heap}<small>%</small>`, v.heap>85?'alert':v.heap>60?'warn':''],
+      pool: [$('#mPool'), `${v.pool}<small>/4</small>`, v.pool>=4?'warn':''],
+      cpu:  [$('#mCpu'),  `${v.cpu}<small>%</small>`, v.cpu>90?'alert':v.cpu>60?'warn':''],
+      resp: [$('#mResp'), `${v.resp}<small> ms</small>`, (+v.resp)>100?'alert':(+v.resp)>30?'warn':''],
+      thru: [$('#mThru'), `${v.thru}<small> r/s</small>`,'']
+    };
+    const [el,html,cls]=map[k];
+    el.querySelector('.mv').innerHTML=html;
+    el.className='metric '+cls;
+  },
+  resetAll(){ Object.assign(this.vals,{lag:0,active:0,queue:0,heap:Heap?Heap.pct():0,pool:0,cpu:2,resp:'—',thru:0}); Object.keys(this.vals).forEach(k=>this.render(k)); }
+};
+
+/* ----------------------------------------------------------------------------
+   Panel highlight helper + flying tokens
+---------------------------------------------------------------------------- */
+function lite(sel,on=true){ const p=$(sel); if(p) p.classList.toggle('lit',on); }
+async function flash(sel,ms=600){ lite(sel,true); setTimeout(()=>lite(sel,false), ms/Sim.speed); }
+
+function fly(fromSel,toSel,label,color){
+  const a=$(fromSel),b=$(toSel); if(!a||!b) return;
+  const ra=a.getBoundingClientRect(), rb=b.getBoundingClientRect();
+  const t=document.createElement('div'); t.className='fly'; t.textContent=label;
+  t.style.cssText+=`color:${color};border-color:${color};background:#0d1220;left:${ra.left+ra.width/2}px;top:${ra.top+ra.height/2}px;`;
+  document.body.appendChild(t);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    t.style.left=(rb.left+rb.width/2-30)+'px'; t.style.top=(rb.top+rb.height/2)+'px'; t.style.opacity='0.15';
+  }));
+  setTimeout(()=>t.remove(), 620);
+}
+
+/* ----------------------------------------------------------------------------
+   Req — incoming request queue
+---------------------------------------------------------------------------- */
+const Req = {
+  nextId:1, queued:[], active:0, done:0, MAXVIS:18,
+  el:$('#reqList'),
+  spawn(n){
+    for(let i=0;i<n;i++) this.queued.push({id:this.nextId++, t:Sim.vtime});
+    this.render();
+    Internals.log('loop',`accept() ×${n} — pending connections queued`);
+    Edu.show({step:`${n} request${n>1?'s':''} arrived`, desc:'New TCP connections accepted by the listening socket; requests wait until the event loop can service them.',
+      why:'Node accepts connections in the poll phase; work is processed one callback at a time on a single JS thread.',
+      comp:'Network Layer → Poll phase', impact: n>=100?'Large bursts build queue depth → latency grows for every request behind the head of the queue.':'Negligible at this volume.'});
+    this.stats();
+  },
+  take(){ const r=this.queued.shift(); if(!r) return null; this.active++; this.render(); this.stats(); return r; },
+  complete(rt){ this.active=Math.max(0,this.active-1); this.done++; this.stats(); if(rt!==undefined) Metrics.set('resp',rt); },
+  render(){
+    this.el.innerHTML='';
+    const vis=this.queued.slice(0,this.MAXVIS);
+    vis.forEach((r,i)=>{
+      const d=document.createElement('div'); d.className='req'+(i===0&&this.active>0?'':'');
+      d.innerHTML=`<span>GET /api/users — #${r.id}</span><span class="meta">waiting</span>`;
+      this.el.appendChild(d);
+    });
+    if(this.queued.length>this.MAXVIS){
+      const o=document.createElement('div'); o.className='req-overflow';
+      o.textContent=`… +${this.queued.length-this.MAXVIS} more queued`;
+      this.el.appendChild(o);
+    }
+    $('#reqHdr').textContent = this.queued.length? `${this.queued.length} queued` : (this.active? 'processing':'idle');
+  },
+  markProcessing(){ const f=this.el.querySelector('.req'); if(f){ f.classList.add('processing'); f.querySelector('.meta').textContent='→ handler'; } },
+  stats(){
+    $('#stQueued').textContent=this.queued.length; $('#stActive').textContent=this.active; $('#stDone').textContent=this.done;
+    Metrics.set('queue',this.queued.length); Metrics.set('active',this.active);
+  },
+  reset(){ this.queued=[]; this.active=0; this.done=0; this.nextId=1; this.render(); this.stats(); }
+};
+
+/* ----------------------------------------------------------------------------
+   Net — socket lifecycle
+---------------------------------------------------------------------------- */
+const Net = {
+  async stage(key, status){
+    $$('#netLC .lc-step').forEach(s=>{ if(s.classList.contains('on')){s.classList.remove('on');s.classList.add('done');} });
+    const el=$(`#netLC .lc-step[data-lc="${key}"]`); if(el){el.classList.add('on');el.classList.remove('done');}
+    if(status) $('#netSt').textContent=status;
+    flash('#pNet',400);
+  },
+  reset(){ $$('#netLC .lc-step').forEach(s=>s.classList.remove('on','done')); $('#netSt').textContent='socket closed'; }
+};
+
+/* ----------------------------------------------------------------------------
+   Stack — V8 call stack
+---------------------------------------------------------------------------- */
+const Stack = {
+  frames:[], el:$('#stackWrap'),
+  push(name, blocked=false){
+    this.frames.push(name);
+    const d=document.createElement('div'); d.className='frame'+(blocked?' blocked':''); d.textContent=name+'()';
+    this.el.appendChild(d); this.refresh(); flash('#pStack',350);
+    Internals.log('v8',`stack push → ${name}() [depth ${this.frames.length}]`);
+  },
+  async pop(){
+    const d=this.el.lastElementChild; if(!d) return;
+    this.frames.pop();
+    d.classList.add('popping'); await Sim.wait(140); d.remove(); this.refresh();
+    Internals.log('v8',`stack pop  ← depth ${this.frames.length}`);
+  },
+  refresh(){
+    [...this.el.children].forEach((c,i)=>c.classList.toggle('top', i===this.el.children.length-1));
+    $('#stackSt').textContent=this.frames.length? `depth ${this.frames.length}` : 'empty';
+  },
+  async clear(){ while(this.frames.length) await this.pop(); },
+  reset(){ this.frames=[]; this.el.innerHTML=''; this.refresh(); }
+};
+
+/* ----------------------------------------------------------------------------
+   V8 — pipeline stages
+---------------------------------------------------------------------------- */
+const V8 = {
+  set(stage, note=''){
+    $$('#v8stages .v8s').forEach(s=>s.classList.toggle('on', s.dataset.s===stage));
+    $('#v8St').textContent = stage? ({parse:'parsing source',compile:'Ignition: bytecode',optimize:'TurboFan: optimizing hot fn',execute:'executing JavaScript'})[stage] : 'idle';
+    $('#v8note').textContent=note;
+    if(stage) flash('#pV8',350);
+  },
+  reset(){ this.set(null,''); }
+};
+
+/* ----------------------------------------------------------------------------
+   Loop — event loop ring (SVG) + phase rows
+---------------------------------------------------------------------------- */
+const Loop = {
+  phases:['timers','pending','idle','poll','check','close'],
+  labels:{timers:'TIMERS',pending:'PENDING',idle:'IDLE',poll:'POLL',check:'CHECK',close:'CLOSE'},
+  iter:0, cx:110, cy:95, r:62,
+  build(){
+    const svg=$('#loopSvg'); const N=6, gap=7;
+    let html='';
+    for(let i=0;i<N;i++){
+      const a0=(i*60-90+gap/2)*Math.PI/180, a1=((i+1)*60-90-gap/2)*Math.PI/180;
+      const p=(a)=>[this.cx+this.r*Math.cos(a), this.cy+this.r*Math.sin(a)];
+      const [x0,y0]=p(a0),[x1,y1]=p(a1);
+      html+=`<path class="seg" data-ph="${this.phases[i]}" d="M ${x0} ${y0} A ${this.r} ${this.r} 0 0 1 ${x1} ${y1}"/>`;
+      const am=(a0+a1)/2, lr=this.r+24;
+      html+=`<text class="seglbl" data-ph="${this.phases[i]}" x="${this.cx+lr*Math.cos(am)}" y="${this.cy+lr*Math.sin(am)+3}">${this.labels[this.phases[i]]}</text>`;
+    }
+    html+=`<line id="needle" x1="${this.cx}" y1="${this.cy}" x2="${this.cx}" y2="${this.cy-this.r+14}" stroke="var(--c-loop)" stroke-width="2.5" stroke-linecap="round"/>`;
+    html+=`<circle cx="${this.cx}" cy="${this.cy}" r="4" fill="var(--c-loop)"/>`;
+    html+=`<text id="loopCenterTxt" x="${this.cx}" y="${this.cy+24}">uv_run()</text>`;
+    html+=`<text id="loopTickTxt" x="${this.cx}" y="${this.cy-12}">—</text>`;
+    svg.innerHTML=html;
+  },
+  async phase(ph, {dwell=500, note}={}){
+    const i=this.phases.indexOf(ph);
+    $$('#loopSvg .seg').forEach(s=>s.classList.toggle('on', s.dataset.ph===ph));
+    $$('#loopSvg .seglbl').forEach(s=>s.classList.toggle('on', s.dataset.ph===ph));
+    $$('#loopPhases .phrow').forEach(r=>r.classList.toggle('on', r.dataset.ph===ph));
+    $('#needle').style.transform=`rotate(${i*60+30}deg)`;
+    $('#loopTickTxt').textContent=this.labels[ph];
+    $('#loopPhaseTxt').textContent='phase: '+ph + (note? ' — '+note : '');
+    flash('#pLoop',350);
+    Internals.log('loop',`uv_run: → ${ph} phase`);
+    if(ph==='timers' && i===0){ this.iter++; $('#loopIter').textContent='tick '+this.iter; }
+    await Sim.wait(dwell);
+  },
+  newTick(){ this.iter++; $('#loopIter').textContent='tick '+this.iter; },
+  setBlocked(on){
+    $('#blockedTag').style.display=on?'inline':'none';
+    $$('#loopSvg .seg').forEach(s=>s.classList.toggle('blocked',on&&s.classList.contains('on')));
+    $$('#loopPhases .phrow.on').forEach(r=>r.classList.toggle('blocked',on));
+  },
+  idle(){
+    $$('#loopSvg .seg,#loopSvg .seglbl,#loopPhases .phrow').forEach(s=>s.classList.remove('on','blocked'));
+    $('#loopTickTxt').textContent='—'; $('#loopPhaseTxt').textContent='phase: — (waiting in poll)';
+    this.setBlocked(false);
+  },
+  reset(){ this.iter=0; $('#loopIter').textContent='tick 0'; this.idle(); }
+};
+
+/* ----------------------------------------------------------------------------
+   Q — three queue families. macro tasks carry their phase tag.
+---------------------------------------------------------------------------- */
+function makeQueue(bodySel, cls, panelSel){
+  return {
+    items:[], el:$(bodySel),
+    push(label, phase){
+      this.items.push({label, phase});
+      this.render(); if(panelSel) flash(panelSel,350);
+      return this.items.length-1;
+    },
+    async runNext(){
+      const it=this.items[0]; if(!it) return null;
+      const first=this.el.querySelector('.task'); if(first){ first.classList.add('running'); await Sim.wait(380); first.classList.add('gone'); await Sim.wait(180); }
+      this.items.shift(); this.render(); return it;
+    },
+    count(phase){ return phase? this.items.filter(i=>i.phase===phase).length : this.items.length; },
+    async runNextOf(phase){
+      const idx=this.items.findIndex(i=>i.phase===phase); if(idx<0) return null;
+      const node=this.el.querySelectorAll('.task')[idx];
+      if(node){ node.classList.add('running'); await Sim.wait(380); node.classList.add('gone'); await Sim.wait(180); }
+      const [it]=this.items.splice(idx,1); this.render(); return it;
+    },
+    render(){
+      this.el.innerHTML='';
+      if(!this.items.length){ this.el.innerHTML='<span class="qempty">empty</span>'; }
+      this.items.forEach(i=>{
+        const d=document.createElement('div'); d.className='task '+cls;
+        d.textContent=i.label + (i.phase&&cls==='macro'? ` ·${i.phase}`:'' );
+        this.el.appendChild(d);
+      });
+      if(cls==='macro'){
+        ['timers','pending','poll','check','close'].forEach(p=>{ const q=$('#q-'+p); if(q) q.textContent=this.count(p); });
+      }
+      Loop && void 0;
+    },
+    reset(){ this.items=[]; this.render(); }
+  };
+}
+const TickQ  = makeQueue('#tickQ','tick','#pTick');
+const MicroQ = makeQueue('#microQ','micro','#pMicro');
+const MacroQ = makeQueue('#macroQ','macro','#pMacro');
+
+/* drain order: nextTick → microtasks. Runs after every macrotask / phase op. */
+async function drainMicro({eduOnFirst=true}={}){
+  let firstTick=true, firstMicro=true;
+  while(TickQ.items.length){
+    if(firstTick&&eduOnFirst){ Edu.show({step:'Drain process.nextTick queue',
+      desc:'Before any Promise microtask or the next loop phase, Node fully drains the nextTick queue.',
+      why:'nextTick callbacks run after the current operation completes, with higher priority than the microtask queue.',
+      comp:'nextTick Queue', impact:'Recursive nextTick can starve I/O — the event loop never advances.'}); firstTick=false; }
+    flash('#pTick',400);
+    const it=await TickQ.runNext();
+    Stack.push(it.label.replace(/\(.*$/,'')); Internals.log('q',`nextTick run: ${it.label}`);
+    V8.set('execute'); await Sim.wait(260); await Stack.pop(); V8.set(null);
+  }
+  while(MicroQ.items.length){
+    if(firstMicro&&eduOnFirst){ Edu.show({step:'Drain microtask queue',
+      desc:'Promise reactions and queueMicrotask callbacks run to completion now, before the event loop moves to its next phase.',
+      why:'V8 drains microtasks at the end of each macrotask — this is why .then() beats setTimeout(0).',
+      comp:'Microtask Queue', impact:'Runs before the next Event Loop phase. Long microtask chains also delay the loop.'}); firstMicro=false; }
+    flash('#pMicro',400);
+    const it=await MicroQ.runNext();
+    Stack.push(it.label.replace(/\(.*$/,'')); Internals.log('q',`microtask run: ${it.label}`);
+    V8.set('execute'); await Sim.wait(260); await Stack.pop(); V8.set(null);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Pool & Workers
+---------------------------------------------------------------------------- */
+const Pool = {
+  threads:[null,null,null,null],
+  build(){
+    $('#poolThreads').innerHTML=[0,1,2,3].map(i=>`
+      <div class="thread" data-t="${i}"><span class="lamp"></span>thread #${i+1}<span class="job">idle</span>
+      </div>`).join('');
+  },
+  acquire(job){
+    const i=this.threads.indexOf(null);
+    if(i<0) return -1;
+    this.threads[i]=job;
+    const el=$(`#poolThreads .thread[data-t="${i}"]`);
+    el.classList.add('busy'); el.querySelector('.job').textContent=job;
+    Metrics.set('pool',this.busy()); flash('#pPool',400);
+    Internals.log('uv',`uv_queue_work → thread #${i+1}: ${job}`);
+    return i;
+  },
+  release(i){
+    if(i<0) return;
+    this.threads[i]=null;
+    const el=$(`#poolThreads .thread[data-t="${i}"]`);
+    el.classList.remove('busy'); el.querySelector('.job').textContent='idle';
+    Metrics.set('pool',this.busy());
+    Internals.log('uv',`thread #${i+1} done → uv_async_send (wake loop)`);
+  },
+  busy(){ return this.threads.filter(Boolean).length; },
+  reset(){ this.threads=[null,null,null,null]; this.build(); Metrics.set('pool',0); }
+};
+
+const Workers = {
+  build(){
+    $('#workerThreads').innerHTML=[0,1].map(i=>`
+      <div class="thread worker" data-w="${i}"><span class="lamp"></span>worker #${i+1}<span class="job">idle</span></div>
+      <div class="progress" data-wp="${i}"><i></i></div>`).join('');
+  },
+  start(i,job){ const el=$(`#workerThreads .thread[data-w="${i}"]`); el.classList.add('wbusy'); el.querySelector('.job').textContent=job; flash('#pWorker',400);
+    Internals.log('uv',`new Worker() — isolated V8 isolate + event loop: ${job}`); },
+  progress(i,p){ $(`#workerThreads .progress[data-wp="${i}"] i`).style.width=p+'%'; },
+  stop(i){ const el=$(`#workerThreads .thread[data-w="${i}"]`); el.classList.remove('wbusy'); el.querySelector('.job').textContent='idle'; this.progress(i,0); },
+  reset(){ this.build(); }
+};
+
+/* ----------------------------------------------------------------------------
+   Db & Redis
+---------------------------------------------------------------------------- */
+const Db = {
+  count:0,
+  async query(kind, ms){
+    this.count++; $('#dbCount').textContent=this.count;
+    $('#dbProto').textContent={mongo:'BSON / MongoDB wire',pg:'PostgreSQL FE/BE',mysql:'MySQL packet'}[kind]||'TCP wire protocol';
+    const row=$('#dbRow'); row.classList.add('on'); $('#dbTxt').textContent={mongo:'MongoDB: db.users.find()',pg:'PostgreSQL: SELECT …',mysql:'MySQL: SELECT …'}[kind];
+    flash('#pDb',ms);
+    const bar=$('#dbLat'); const t0=performance.now(), dur=ms/Sim.speed;
+    await new Promise(res=>{ const iv=setInterval(()=>{ const p=Math.min(100,(performance.now()-t0)/dur*100); bar.style.width=p+'%'; if(p>=100){clearInterval(iv);res();} },30); });
+    row.classList.remove('on'); $('#dbTxt').textContent='idle — pool: 10 sockets'; bar.style.width='0%';
+  },
+  reset(){ this.count=0; $('#dbCount').textContent='0'; $('#dbLat').style.width='0%'; $('#dbRow').classList.remove('on'); $('#dbTxt').textContent='idle — pool: 10 sockets'; }
+};
+
+const Redis = {
+  hits:0, miss:0,
+  async lookup(hit, ms=180){
+    const row=$('#redisRow'); row.classList.add('on'); $('#redisTxt').textContent='GET cache:user:42';
+    flash('#pRedis',ms*2);
+    const bar=$('#redisLat'); bar.style.width='100%';
+    await Sim.wait(ms);
+    bar.style.width='0%'; row.classList.remove('on');
+    if(hit){ this.hits++; $('#redisHits').textContent=this.hits; $('#redisBody').classList.remove('missflash'); void $('#redisBody').offsetWidth; $('#redisBody').classList.add('hitflash'); $('#redisTxt').textContent='HIT — value returned'; }
+    else   { this.miss++; $('#redisMiss').textContent=this.miss; $('#redisBody').classList.remove('hitflash'); void $('#redisBody').offsetWidth; $('#redisBody').classList.add('missflash'); $('#redisTxt').textContent='MISS — (nil)'; }
+    await Sim.wait(220);
+    $('#redisTxt').textContent='idle';
+  },
+  reset(){ this.hits=0;this.miss=0;$('#redisHits').textContent='0';$('#redisMiss').textContent='0';$('#redisTxt').textContent='idle';$('#redisLat').style.width='0%'; $('#redisBody').classList.remove('hitflash','missflash'); }
+};
+
+/* ----------------------------------------------------------------------------
+   Heap & GC — 100-cell grid, 64 "MB" total
+---------------------------------------------------------------------------- */
+const Heap = {
+  N:100, used:[], grid:$('#heapGrid'),
+  build(){ this.grid.innerHTML=Array.from({length:this.N},()=>'<div class="cell"></div>').join(''); this.used=new Array(this.N).fill(null); this.paint(); },
+  alloc(n,type='obj'){
+    let done=0;
+    for(let i=0;i<this.N&&done<n;i++) if(!this.used[i]){ this.used[i]=type; done++; }
+    this.paint(); flash('#pHeap',300);
+    Internals.log('mem',`alloc ×${n} ${type} (${(this.pct())}% of heap)`);
+    return done;
+  },
+  freeType(type,n=Infinity){
+    let done=0;
+    for(let i=this.N-1;i>=0&&done<n;i--) if(this.used[i]===type){ this.used[i]=null; done++; }
+    this.paint(); return done;
+  },
+  freeRandom(frac){ // GC sweep of unreachable, non-leak cells
+    let freed=0;
+    for(let i=0;i<this.N;i++) if(this.used[i]&&this.used[i]!=='leak'&&Math.random()<frac){ this.used[i]=null; freed++; }
+    this.paint(); return freed;
+  },
+  cells(){ return [...this.grid.children]; },
+  paint(){
+    this.cells().forEach((c,i)=>{ c.className='cell'+(this.used[i]?' '+this.used[i]:''); });
+    const pct=this.pct();
+    $('#heapBar i').style.width=pct+'%';
+    $('#heapUsed').textContent=`${Math.round(pct*0.64)} MB / 64 MB`;
+    $('#heapPct').textContent=pct+'%';
+    Metrics.set('heap',pct);
+  },
+  pct(){ return Math.round(this.used.filter(Boolean).length/this.N*100); },
+  reset(){ this.build(); }
+};
+
+const GC = {
+  async run({note='minor GC (scavenge)', keepLeaks=true, sweepFrac=0.8}={}){
+    $('#gcSt').textContent='gc running'; flash('#pHeap',1800);
+    // MARK
+    this.phase('mark');
+    Edu.show({step:'GC: Mark phase', desc:'V8 walks the object graph from GC roots (stack, globals, closures) and marks everything still reachable.',
+      why:'Tri-color mark-and-sweep: only reachable objects survive. Anything unmarked is garbage.',
+      comp:'Garbage Collector (Orinoco)', impact:'Marking pauses share time with JS (incremental marking) but major GC still costs ms-level pauses.'});
+    Internals.log('mem','GC: mark roots → tri-color marking');
+    Heap.cells().forEach((c,i)=>{ if(Heap.used[i]&&(keepLeaks&&Heap.used[i]==='leak'||Math.random()>sweepFrac)) c.classList.add('marked'); });
+    await Sim.wait(900);
+    // SWEEP
+    this.phase('sweep');
+    Edu.show({step:'GC: Sweep phase', desc:'Unmarked (unreachable) objects are swept; their memory returns to the free list.',
+      why:'Objects with no references from any root can never be used again — safe to reclaim.',
+      comp:'Garbage Collector', impact:'Heap usage drops; allocation pressure relieved — unless references are leaked.'});
+    Internals.log('mem','GC: sweep unmarked regions → free lists');
+    Heap.cells().forEach(c=>{ if(!c.classList.contains('marked')&&c.className!=='cell') c.classList.add('sweeping'); });
+    await Sim.wait(700);
+    const freed=Heap.freeRandom(sweepFrac);
+    // COMPACT
+    this.phase('compact');
+    Edu.show({step:'GC: Compaction', desc:'Surviving objects are moved together to eliminate fragmentation; pointers are updated.',
+      why:'Compaction keeps allocation a cheap bump-pointer operation and improves cache locality.',
+      comp:'Garbage Collector', impact:`~${Math.round(freed*0.64)} MB reclaimed this cycle.`});
+    Internals.log('mem',`GC: compact + update pointers — freed ${freed} cells`);
+    // visually compact: re-pack used cells to the front
+    const types=Heap.used.filter(Boolean); Heap.used.fill(null); types.forEach((t,i)=>Heap.used[i]=t);
+    Heap.paint();
+    await Sim.wait(700);
+    this.phase(null); Heap.cells().forEach(c=>c.classList.remove('marked','sweeping'));
+    $('#gcSt').textContent='gc idle';
+    return freed;
+  },
+  phase(p){ $$('#gcPhases .gcp').forEach(g=>g.classList.toggle('on',g.dataset.g===p)); },
+  reset(){ this.phase(null); $('#gcSt').textContent='gc idle'; }
+};
+
+/* ----------------------------------------------------------------------------
+   Streams
+---------------------------------------------------------------------------- */
+const Streams = {
+  async flow(chunks=4,label='64 KB file'){
+    $('#streamSt').textContent='piping '+label; flash('#pStream',chunks*700);
+    $$('#streamLane .snode').forEach(s=>s.classList.add('on'));
+    for(let c=0;c<chunks;c++){
+      const d=document.createElement('div'); d.className='chunk';
+      d.style.animation=`chunkflow ${0.9/Sim.speed}s linear forwards`;
+      $('#streamLane').appendChild(d);
+      Internals.log('uv',`stream: chunk ${c+1}/${chunks} (16 KB) readable→transform→writable`);
+      $('#streamMeta').textContent=`chunk ${c+1}/${chunks} — backpressure ok (buffer < highWaterMark)`;
+      await Sim.wait(450);
+      setTimeout(()=>d.remove(),1200);
+    }
+    await Sim.wait(500);
+    $$('#streamLane .snode').forEach(s=>s.classList.remove('on'));
+    $('#streamSt').textContent='idle'; $('#streamMeta').textContent='backpressure: highWaterMark 16KB';
+  },
+  reset(){ $$('#streamLane .snode').forEach(s=>s.classList.remove('on')); $$('#streamLane .chunk').forEach(c=>c.remove()); $('#streamSt').textContent='idle'; }
+};
+
+/* ----------------------------------------------------------------------------
+   Reset plumbing
+---------------------------------------------------------------------------- */
+function softReset(){ // between scenarios — keep counters like done requests
+  Stack.reset(); V8.reset(); Loop.reset(); TickQ.reset(); MicroQ.reset(); MacroQ.reset();
+  Net.reset(); Streams.reset(); GC.reset(); Loop.setBlocked(false);
+  $('#crash').style.display='none';
+  Metrics.set('lag',0); Metrics.set('cpu',2);
+}
+function hardReset(){
+  softReset(); Req.reset(); Pool.reset(); Workers.reset(); Db.reset(); Redis.reset(); Heap.reset();
+  Internals.clear(); Timeline.reset(); Metrics.resetAll();
+  $$('#scenarios button').forEach(b=>b.classList.remove('active'));
+  Edu.show({step:'Simulator reset', desc:'All components returned to initial state. Pick a scenario to run.', why:'—', comp:'—', impact:'—'});
+}
+function toggleAdvanced(){
+  document.body.classList.toggle('advanced');
+  const on=document.body.classList.contains('advanced');
+  $('#advBtn').classList.toggle('on',on);
+  $('#advBtn').textContent=on?'⚙ hide internal details':'⚙ show internal details';
+}
+</script>
+<script>
+/* ============================================================================
+   SHARED SUB-SEQUENCES
+   ============================================================================ */
+async function intake({path='GET /api/users', firstRun=true}={}){
+  if(Req.queued.length===0) Req.spawn(1);
+  Timeline.mark(Sim.vtime,'TCP accept',true);
+  await Net.stage('syn','3-way handshake');
+  await step({edu:{step:'TCP connection arrives', desc:`Client opens a TCP connection; the kernel completes the 3-way handshake and queues it on the listen socket's accept queue.`,
+    why:'HTTP rides on TCP. Until accepted, the connection sits in a kernel backlog — Node has not run any JS yet.',
+    comp:'Network Layer (kernel ↔ libuv)', impact:'Backlog overflow under extreme load drops connections (ECONNREFUSED).'}, ms:850, clock:0.2, log:{tag:'uv',msg:'epoll_wait → readable on listen fd'}});
+
+  await Net.stage('est','ESTABLISHED');
+  await Loop.phase('poll',{dwell:450});
+  await step({edu:{step:'Poll phase: accept + read', desc:'The event loop is parked in epoll/kqueue inside the poll phase. The kernel signals readiness; libuv accepts the socket and reads the request bytes.',
+    why:'The poll phase is where Node spends most of its life — blocked on the kernel waiting for I/O readiness, costing ~0% CPU.',
+    comp:'Event Loop — Poll phase', impact:'One thread can multiplex tens of thousands of sockets this way.'}, ms:900, clock:0.3, log:{tag:'uv',msg:'accept(fd) → conn fd; read() → HTTP bytes'}});
+
+  await Net.stage('req','request bytes in');
+  await Net.stage('parse','llhttp parsing');
+  await step({edu:{step:'HTTP parsing (llhttp)', desc:`Raw bytes are parsed into method, URL, headers. Node emits the 'request' event with (req, res) objects.`,
+    why:'llhttp is a C parser generated from TypeScript — parsing happens off the JS heap until objects are materialized.',
+    comp:'Network Layer → http module', impact:'Header parsing is fast; huge headers/bodies cost memory.'}, ms:800, clock:0.1, log:{tag:'loop',msg:`emit('request') → ${path}`}});
+
+  const r=Req.take(); Req.markProcessing&&Req.render();
+  fly('#pReq','#pStack', path, 'var(--c-req)');
+  if(firstRun){
+    V8.set('parse','first call: source → AST');
+    await step({edu:{step:'V8: parse', desc:'On first execution V8 parses the handler source into an Abstract Syntax Tree.', why:'JS ships as text; V8 lazily parses functions when first invoked.', comp:'V8 — Parser', impact:'Parse cost is paid once, then cached.'}, ms:650, clock:0.2, log:{tag:'v8',msg:'lazy parse handler() → AST'}});
+    V8.set('compile','Ignition emits bytecode');
+    await step({edu:{step:'V8: compile (Ignition)', desc:'The AST is compiled to compact bytecode by the Ignition interpreter.', why:'Bytecode starts fast; TurboFan optimizes only functions that become hot.', comp:'V8 — Ignition', impact:'Hot handlers later get optimized machine code (TurboFan).'}, ms:650, clock:0.2, log:{tag:'v8',msg:'Ignition: bytecode generated'}});
+  }
+  V8.set('execute','running on the main thread');
+  Stack.push('emitRequest');
+  Stack.push('handler');
+  await step({edu:{step:'Handler pushed on Call Stack', desc:`handler(req, res) is pushed onto V8's single call stack and starts executing synchronously.`,
+    why:'All JavaScript runs on one stack, one thread. Whatever is on top is the only thing running in the whole process.',
+    comp:'Call Stack / V8', impact:'Everything else — every other request — waits while this frame runs.'}, ms:900, clock:0.1, log:{tag:'v8',msg:'invoke handler(req,res)'}});
+  return r;
+}
+
+async function respond(r, rtMs){
+  await Net.stage('res','writing response');
+  Stack.push('res.end');
+  await step({edu:{step:'res.end() — write response', desc:'The serialized HTTP response is written to the socket send buffer; the kernel flushes it to the client.',
+    why:'Writes are non-blocking: if the socket buffer is full, libuv queues the write and finishes it in a later poll phase.',
+    comp:'Network Layer', impact:'Slow clients cause write backpressure, not blocked JS.'}, ms:750, clock:0.2, log:{tag:'uv',msg:'uv_write → 200 OK ('+rtMs+'ms)'}});
+  await Stack.pop(); await Stack.pop(); await Stack.pop().catch(()=>{});
+  await Stack.clear();
+  V8.set(null);
+  await Net.stage('fin','keep-alive / closed');
+  Req.complete(rtMs);
+  Timeline.mark(Sim.vtime,'200 OK →',true);
+  Metrics.set('thru', Math.round(1000/Math.max(rtMs,1)));
+}
+
+/* fast-path request used inside stress scenarios (no edu narration) */
+async function quickServe(ms=120){
+  const r=Req.take(); if(!r) return;
+  Stack.push('handler'); V8.set('execute');
+  await Sim.wait(ms);
+  await Stack.pop(); V8.set(null);
+  Req.complete(Math.round(Sim.vtime - 0));
+}
+
+/* ============================================================================
+   SCENARIOS
+   ============================================================================ */
+const Scenarios = [
+
+/* ── 1 ─────────────────────────────────────────────────────────────────── */
+{ n:1, name:'Simple API Request', async run(){
+  const r=await intake({});
+  Heap.alloc(3,'obj');
+  await step({edu:{step:'Synchronous work in handler', desc:'The handler builds a small JSON object — pure CPU work, no I/O. Objects are allocated in the V8 new-space heap.',
+    why:'Synchronous code never leaves the call stack; nothing is queued anywhere.', comp:'V8 + Memory Heap', impact:'Fast (~µs). This is the ideal: tiny synchronous handlers.'}, ms:850, clock:0.3, log:{tag:'mem',msg:'new-space alloc: {users:[…]}'}});
+  await respond(r, 1);
+  await Loop.phase('poll',{dwell:400});
+  Loop.idle();
+  await step({edu:{step:'Loop parks in poll again', desc:'Nothing is pending, so uv_run blocks in epoll_wait waiting for the next event. Total request time ≈ 1 ms.',
+    why:'An idle Node process burns ~0% CPU — it is asleep in the kernel.', comp:'Event Loop', impact:'Throughput here is bounded only by per-request CPU.'}, ms:900});
+}},
+
+/* ── 2 ─────────────────────────────────────────────────────────────────── */
+{ n:2, name:'Database Query', async run(){
+  const r=await intake({path:'GET /api/orders'});
+  Stack.push('db.query');
+  await step({edu:{step:'db.query() called', desc:'The driver serializes the query into the database wire protocol and writes it to a pooled TCP socket. It registers a callback and returns immediately.',
+    why:'The driver does not wait. The socket write is non-blocking; "waiting for the DB" is just a watched file descriptor.',
+    comp:'Database driver → Socket', impact:'The JS thread is free the instant the bytes are handed to libuv.'}, ms:1000, clock:0.2, log:{tag:'uv',msg:'uv_write(db_socket, SELECT…) + register read interest'}});
+  fly('#pStack','#pDb','SELECT * FROM orders','var(--c-db)');
+  await Stack.pop(); await Stack.pop(); await Stack.pop(); await Stack.clear(); V8.set(null);
+
+  await step({edu:{step:'⚠ Misconception check', desc:'This DB query does NOT use the libuv thread pool. Network I/O (DB, Redis, HTTP) uses non-blocking sockets watched by epoll in the poll phase. The thread pool serves fs, dns.lookup, crypto and zlib.',
+    why:'Sockets support readiness notification, so no thread needs to block. Files mostly do not — hence the pool.',
+    comp:'Poll phase vs Thread Pool', impact:'This is why Node handles 10k concurrent DB queries with 1 thread + 0 pool threads.'}, ms:1700, log:{tag:'uv',msg:'NOTE: tcp uses uv__io_poll, not uv_queue_work'}});
+
+  Loop.idle();
+  const dbq = Db.query('pg', 2000);             // DB working in parallel
+  await step({edu:{step:'Loop idle while DB works (~20 ms)', desc:'The event loop parks in the poll phase. PostgreSQL executes the query on its own server. The Node process could serve other requests right now.',
+    why:'I/O wait costs no CPU. Concurrency in Node = overlapping these waits.', comp:'Event Loop (poll) + Database', impact:'10,000 in-flight queries ≈ 10,000 watched sockets, one thread.'}, ms:1200, clock:18, log:{tag:'loop',msg:'epoll_wait(timeout=…) — 1 fd watched'}});
+  await dbq;
+
+  Timeline.mark(Sim.vtime,'DB rows ready');
+  MacroQ.push('onDbRows(cb)','poll');
+  fly('#pDb','#pMacro','rows ←','var(--c-db)');
+  await step({edu:{step:'Socket readable → callback queued', desc:'The kernel marks the DB socket readable. libuv wakes, reads the result bytes, and the driver schedules your callback in the poll phase queue.',
+    why:'Completion events become callbacks; callbacks wait in phase queues until the loop reaches them.',
+    comp:'Poll phase callback queue', impact:'Queue depth here = event loop lag for I/O callbacks.'}, ms:1100, clock:0.5, log:{tag:'uv',msg:'epoll: db fd READABLE → read 4 KB → enqueue cb'}});
+
+  await Loop.phase('poll',{dwell:500});
+  const it=await MacroQ.runNextOf('poll');
+  Stack.push('onDbRows'); V8.set('execute');
+  Heap.alloc(5,'arr');
+  await step({edu:{step:'Callback executes rows', desc:'onDbRows runs on the call stack: rows are deserialized into JS arrays (heap allocations) and the response is built.',
+    why:'Only now — back on the single JS thread — does your code see the data.',
+    comp:'Call Stack + Heap', impact:'Deserializing huge result sets is synchronous CPU: it blocks the loop.'}, ms:1000, clock:1, log:{tag:'v8',msg:'parse 120 rows → Array(120)'}});
+  await drainMicro({eduOnFirst:false});
+  await respond(r, 21);
+  Loop.idle();
+}},
+
+/* ── 3 ─────────────────────────────────────────────────────────────────── */
+{ n:3, name:'Redis Cache Hit', async run(){
+  const r=await intake({path:'GET /api/user/42'});
+  Stack.push('redis.get');
+  await step({edu:{step:'redis.get("user:42")', desc:'RESP command written to the Redis socket; callback registered; function returns.',
+    why:'Same non-blocking socket pattern as the DB — Redis is just much closer and in-memory.',
+    comp:'Redis client → Socket', impact:'Round trip ~0.3 ms on a local network.'}, ms:800, clock:0.2, log:{tag:'uv',msg:'uv_write(redis, GET user:42)'}});
+  fly('#pStack','#pRedis','GET user:42','var(--c-redis)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  await Redis.lookup(true, 400);
+  Timeline.mark(Sim.vtime,'Redis HIT');
+  MacroQ.push('onRedisReply(cb)','poll');
+  await step({edu:{step:'Cache HIT', desc:'Redis returned the serialized user in ~0.3 ms. Reply callback queued in the poll phase.',
+    why:'Redis keeps data in RAM with O(1) key lookup — no disk, no query planning.',
+    comp:'Redis Cache', impact:'~60× faster than the 20 ms DB path. The DB was never touched.'}, ms:900, clock:0.4, log:{tag:'uv',msg:'redis fd READABLE → $231\\r\\n{json}'}});
+  await Loop.phase('poll',{dwell:450});
+  await MacroQ.runNextOf('poll');
+  Stack.push('onRedisReply'); V8.set('execute'); Heap.alloc(1,'obj');
+  await step({edu:{step:'JSON.parse cached value', desc:'The cached string is parsed and sent straight back.', why:'Cache hits skip the entire database layer.', comp:'Call Stack', impact:'Total ≈ 1 ms vs ≈ 21 ms uncached.'}, ms:750, clock:0.3});
+  await respond(r, 1);
+  Loop.idle();
+}},
+
+/* ── 4 ─────────────────────────────────────────────────────────────────── */
+{ n:4, name:'Redis Cache Miss → DB → Backfill', async run(){
+  const r=await intake({path:'GET /api/user/77'});
+  Stack.push('redis.get');
+  await step({edu:{step:'redis.get("user:77")', desc:'Check the cache first — the cache-aside pattern.', why:'Reads should hit RAM when possible.', comp:'Redis client', impact:'—'}, ms:700, clock:0.2});
+  fly('#pStack','#pRedis','GET user:77','var(--c-redis)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  await Redis.lookup(false, 400);
+  Timeline.mark(Sim.vtime,'Redis MISS');
+  await step({edu:{step:'Cache MISS — fall through to DB', desc:'Redis replied (nil). The callback now issues the real database query.',
+    why:'Key absent: first access, expired TTL, or evicted under memory pressure.',
+    comp:'Redis → Database', impact:'This request pays full DB latency; the next ones will not.'}, ms:1000, clock:0.4, log:{tag:'loop',msg:'(nil) → db.query fallback'}});
+  Stack.push('onRedisReply'); Stack.push('db.query'); V8.set('execute');
+  await Sim.wait(400);
+  fly('#pStack','#pDb','SELECT … WHERE id=77','var(--c-db)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  const q=Db.query('mysql', 1800);
+  await step({edu:{step:'DB query in flight (~20 ms)', desc:'Loop parks in poll while MySQL works.', why:'Non-blocking socket, as always.', comp:'Event Loop + DB', impact:'—'}, ms:1100, clock:19});
+  await q;
+  MacroQ.push('onDbRow(cb)','poll');
+  await Loop.phase('poll',{dwell:400});
+  await MacroQ.runNextOf('poll');
+  Stack.push('onDbRow'); V8.set('execute'); Heap.alloc(2,'obj');
+  await step({edu:{step:'Backfill cache: SETEX', desc:'Row fetched. Before responding, write it to Redis with a TTL (fire-and-forget) so the next request hits.',
+    why:'Cache-aside: the application owns cache population.', comp:'Redis Cache', impact:'Hit ratio ↑ → average latency collapses toward the Redis path.'}, ms:1000, clock:0.5, log:{tag:'uv',msg:'uv_write(redis, SETEX user:77 300 {json})'}});
+  fly('#pStack','#pRedis','SETEX user:77','var(--c-redis)');
+  await respond(r, 21);
+  Loop.idle();
+}},
+
+/* ── 5 ─────────────────────────────────────────────────────────────────── */
+{ n:5, name:'Promise Execution', async run(){
+  Req.spawn(1); const r=Req.take();
+  V8.set('execute'); Stack.push('main');
+  await step({edu:{step:'Synchronous script starts', desc:'main() runs: it creates a Promise.', why:'—', comp:'Call Stack', impact:'—'}, ms:700, clock:0, t:0, tl:'main()'});
+  Stack.push('new Promise');
+  Stack.push('executor');
+  await step({edu:{step:'Executor runs SYNCHRONOUSLY', desc:'The function passed to new Promise(...) executes immediately, right now, on the stack — it is not deferred.',
+    why:'Per spec, the executor is invoked synchronously inside the constructor. Only the reactions (.then) are async.',
+    comp:'Call Stack / V8', impact:'Heavy work in an executor blocks just like any sync code.'}, ms:1300, clock:0.1, log:{tag:'v8',msg:'PromiseConstructor → executor() sync'}});
+  await step({edu:{step:'resolve(value) called', desc:'The promise transitions pending → fulfilled. Any .then reactions will be scheduled as microtasks.',
+    why:'Settling is just a state change + scheduling; nothing runs yet.', comp:'V8 promise internals', impact:'—'}, ms:900, clock:0.1, log:{tag:'v8',msg:'PromiseResolve → state=fulfilled'}});
+  await Stack.pop(); await Stack.pop();
+  Stack.push('.then(onFulfilled)');
+  MicroQ.push('onFulfilled(value)');
+  fly('#pStack','#pMicro','.then reaction','var(--c-micro)');
+  await step({edu:{step:'Reaction → Microtask Queue', desc:'.then(onFulfilled) sees an already-fulfilled promise and enqueues the reaction in the microtask queue.',
+    why:'Promise callbacks are NEVER called synchronously — even when already resolved — guaranteeing consistent async ordering.',
+    comp:'Microtask Queue', impact:'Runs before any timer/I-O callback, right after the current stack empties.'}, ms:1300, clock:0.1, t:0.3, tl:'.then queued'});
+  await Stack.pop(); await Stack.pop();
+  await step({edu:{step:'Stack empties', desc:'Synchronous code is done. V8 now drains the microtask queue as part of finishing this macrotask.',
+    why:'Microtask checkpoint: after every macrotask / stack unwind.', comp:'V8 microtask checkpoint', impact:'—'}, ms:800, clock:0.1});
+  await drainMicro();
+  Timeline.mark(Sim.vtime,'.then ran',true);
+  V8.set(null); Req.complete(1); Loop.idle();
+}},
+
+/* ── 6 ─────────────────────────────────────────────────────────────────── */
+{ n:6, name:'Async/Await — desugared', async run(){
+  Req.spawn(1); const r=Req.take();
+  V8.set('execute'); Stack.push('main'); Stack.push('async getUser');
+  await step({edu:{step:'async function getUser() invoked', desc:'It starts running SYNCHRONOUSLY on the stack like any function — until the first await.',
+    why:'async/await is syntax over promises + a state machine. There is no thread, no magic.',
+    comp:'Call Stack', impact:'Code before the first await blocks like normal sync code.'}, ms:1200, clock:0.1, t:0, tl:'getUser() start'});
+  Stack.push('fetchFromDb');
+  await step({edu:{step:'await fetchFromDb()', desc:'fetchFromDb returns a pending Promise. The await SUSPENDS getUser: its locals are saved in a heap closure, and the rest of the function becomes a .then continuation.',
+    why:'Desugared: fetchFromDb().then(restOfGetUser). The function literally returns here and pops off the stack.',
+    comp:'V8 — async state machine', impact:'The thread is freed during the wait — this is the whole point.'}, ms:1700, clock:0.1, log:{tag:'v8',msg:'suspend getUser @ await; continuation = closure on heap'}});
+  Heap.alloc(1,'obj');
+  fly('#pStack','#pDb','query →','var(--c-db)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  const q=Db.query('mongo', 1500);
+  await step({edu:{step:'getUser is OFF the stack', desc:'Note the empty call stack. The "paused" function exists only as heap state + a promise reaction. The loop is free.',
+    why:'Await ≠ blocking. Other requests run here.', comp:'Event Loop + Heap', impact:'Concurrency preserved.'}, ms:1300, clock:14});
+  await q;
+  MicroQ.push('resume getUser (continuation)');
+  fly('#pDb','#pMicro','resolve →','var(--c-micro)');
+  await step({edu:{step:'Promise resolves → continuation queued', desc:'The DB promise fulfills; the saved continuation is pushed to the MICROTASK queue (not a phase queue).',
+    why:'Await resumption is a promise reaction → microtask semantics.', comp:'Microtask Queue', impact:'Resumes before any pending timers or I/O callbacks.'}, ms:1300, clock:0.3, t:Sim.vtime, tl:'resolve'});
+  await drainMicro({eduOnFirst:false});
+  Stack.push('getUser (resumed)'); V8.set('execute');
+  await step({edu:{step:'getUser resumes after await', desc:'Execution continues at the line after await, locals restored from the closure. Returning fulfills getUser\'s own promise.',
+    why:'The state machine advanced one step.', comp:'Call Stack', impact:'Each await = one suspend/resume cycle ≈ microtask overhead (~ns–µs).'}, ms:1300, clock:0.2, t:Sim.vtime, tl:'resumed',});
+  await Stack.clear(); V8.set(null); Req.complete(15); Loop.idle();
+}},
+
+/* ── 7 ─────────────────────────────────────────────────────────────────── */
+{ n:7, name:'setTimeout — Timers phase', async run(){
+  V8.set('execute'); Stack.push('main');
+  await step({edu:{step:'setTimeout(cb, 100) called', desc:'libuv inserts a timer into its min-heap, keyed by expiry time. Nothing is queued yet.',
+    why:'Timers are data, not threads: a sorted structure the loop consults each tick.',
+    comp:'libuv timer heap', impact:'O(log n) insert; millions of timers are fine.'}, ms:1300, clock:0.1, t:0, tl:'timer armed', log:{tag:'uv',msg:'uv_timer_start(handle, 100ms) → min-heap'}});
+  await Stack.clear(); V8.set(null); Loop.idle();
+  await step({edu:{step:'Poll phase computes its timeout', desc:'With nothing else to do, the loop blocks in poll — but only for ≤ time-to-next-timer, so it wakes exactly when the timer is due.',
+    why:'epoll_wait(timeout = next_timer - now). This is how timers and I/O share one thread.',
+    comp:'Event Loop — Poll', impact:'Timers fire no EARLIER than requested; lateness depends on loop load.'}, ms:1500, clock:100, log:{tag:'uv',msg:'epoll_wait(timeout=100)'}});
+  Loop.newTick();
+  MacroQ.push('timeoutCb()','timers');
+  await Loop.phase('timers',{dwell:600});
+  await step({edu:{step:'Timers phase: expiry check', desc:'New loop iteration. uv updates "now", pops all expired timers from the heap, and runs their callbacks.',
+    why:'Phase 1 of every iteration handles setTimeout/setInterval.',
+    comp:'Event Loop — Timers phase', impact:'A blocked previous iteration delays this — timer drift.'}, ms:1100, clock:0.2, t:Sim.vtime, tl:'timers phase'});
+  await MacroQ.runNextOf('timers');
+  Stack.push('timeoutCb'); V8.set('execute');
+  await step({edu:{step:'Callback executes', desc:'timeoutCb runs ~100.3 ms after scheduling — the 0.3 ms is loop overhead.', why:'—', comp:'Call Stack', impact:'—'}, ms:900, clock:0.3});
+  await drainMicro({eduOnFirst:false});
+  await Stack.clear(); V8.set(null);
+  for(const p of ['pending','idle','poll','check','close']) await Loop.phase(p,{dwell:260});
+  await step({edu:{step:'Iteration completes', desc:'The loop walks the remaining phases (all empty) and parks in poll again.', why:'—', comp:'Event Loop', impact:'—'}, ms:700});
+  Loop.idle();
+}},
+
+/* ── 8 ─────────────────────────────────────────────────────────────────── */
+{ n:8, name:'setImmediate — Check phase', async run(){
+  V8.set('execute'); Stack.push('main');
+  MacroQ.push('immediateCb()','check');
+  MacroQ.push('timeout0Cb()','timers');
+  await step({edu:{step:'setImmediate(cb) + setTimeout(cb, 0)', desc:'Both scheduled from the main script. Immediate goes to the CHECK queue; the 0 ms timer is clamped to 1 ms in the timer heap.',
+    why:'They live in different phases — so which runs first?', comp:'Check queue + Timer heap', impact:'—'}, ms:1500, clock:0.1, log:{tag:'uv',msg:'uv_check + uv_timer(1ms)'}});
+  await Stack.clear(); V8.set(null);
+  await step({edu:{step:'Ordering is NON-deterministic here', desc:'From the main script, timers-vs-immediate depends on whether 1 ms has elapsed when the loop starts — it varies run to run.',
+    why:'Loop startup cost vs the 1 ms clamp is a race.', comp:'Event Loop', impact:'Inside an I/O callback, setImmediate ALWAYS wins (check comes right after poll).'}, ms:1700});
+  Loop.newTick();
+  await Loop.phase('timers',{dwell:500});
+  await MacroQ.runNextOf('timers');
+  Stack.push('timeout0Cb'); V8.set('execute'); await Sim.wait(450); await Stack.clear(); V8.set(null);
+  await step({edu:{step:'This run: timer won', desc:'1 ms had elapsed, so the timers phase ran the timeout first.', why:'—', comp:'Timers phase', impact:'—'}, ms:700, clock:1, t:Sim.vtime, tl:'timeout(0)'});
+  await Loop.phase('pending',{dwell:250}); await Loop.phase('idle',{dwell:200}); await Loop.phase('poll',{dwell:350});
+  await Loop.phase('check',{dwell:550});
+  await MacroQ.runNextOf('check');
+  Stack.push('immediateCb'); V8.set('execute');
+  await step({edu:{step:'Check phase runs setImmediate', desc:'Right after poll, the check phase drains the immediate queue.',
+    why:'"Immediate" means: immediately after I/O polling — not before timers.',
+    comp:'Event Loop — Check phase', impact:'Use setImmediate to yield after I/O work; it cannot starve poll the way recursive nextTick can.'}, ms:1300, clock:0.2, t:Sim.vtime, tl:'setImmediate'});
+  await Stack.clear(); V8.set(null); await Loop.phase('close',{dwell:250}); Loop.idle();
+}},
+
+/* ── 9 ─────────────────────────────────────────────────────────────────── */
+{ n:9, name:'process.nextTick — priority & starvation', async run(){
+  V8.set('execute'); Stack.push('main');
+  MicroQ.push('promiseCb (.then)');
+  TickQ.push('tickCb1');
+  TickQ.push('tickCb2');
+  MacroQ.push('timeoutCb()','timers');
+  await step({edu:{step:'Schedule one of each', desc:'Promise.resolve().then(promiseCb); process.nextTick(tickCb1); process.nextTick(tickCb2); setTimeout(timeoutCb).',
+    why:'Three different queues, three different priorities.', comp:'All queues', impact:'—'}, ms:1600, clock:0.1});
+  await Stack.clear(); V8.set(null);
+  await step({edu:{step:'Priority: nextTick → microtasks → loop', desc:'When the stack empties: the ENTIRE nextTick queue drains first, then all microtasks, and only then may the event loop advance a phase.',
+    why:'nextTick predates promises and was given super-priority for API consistency (emit errors async-but-asap).',
+    comp:'nextTick + Microtask queues', impact:'Watch the order: tickCb1, tickCb2, promiseCb, then timeoutCb.'}, ms:1800});
+  await drainMicro();
+  Loop.newTick();
+  await Loop.phase('timers',{dwell:500});
+  await MacroQ.runNextOf('timers');
+  Stack.push('timeoutCb'); V8.set('execute'); await Sim.wait(400); await Stack.clear(); V8.set(null);
+  Timeline.mark(Sim.vtime,'timer last',true);
+  /* starvation demo */
+  await step({edu:{step:'Starvation demo: recursive nextTick', desc:'Now a callback re-schedules itself with process.nextTick forever. Watch the loop: it never reaches another phase.',
+    why:'The nextTick queue must be EMPTY before the loop proceeds — refilling it traps execution.',
+    comp:'nextTick Queue', impact:'I/O, timers, everything starves. CPU pins at 100%. setImmediate would not do this.'}, ms:1500});
+  Metrics.set('cpu',100);
+  let lag=0;
+  for(let i=1;i<=6;i++){
+    TickQ.push('recurse #'+i);
+    flash('#pTick',300);
+    const it=await TickQ.runNext();
+    Stack.push('recurse'); V8.set('execute'); await Sim.wait(200); await Stack.pop(); V8.set(null);
+    lag+=12; Metrics.set('lag',lag); Sim.clock(12);
+    Internals.log('q','nextTick re-queued itself — loop cannot advance');
+  }
+  Loop.setBlocked(true);
+  await step({edu:{step:'Event loop starved', desc:'Six "ticks" of pure nextTick recursion; the loop pointer never moved. Real servers die exactly like this.',
+    why:'—', comp:'Event Loop', impact:`Loop lag: ${lag} ms and climbing. Use setImmediate for cooperative recursion.`}, ms:1600});
+  Loop.setBlocked(false); Metrics.set('cpu',2); Metrics.set('lag',0); Loop.idle();
+}},
+
+/* ── 10 ────────────────────────────────────────────────────────────────── */
+{ n:10, name:'fs.readFile — Thread Pool', async run(){
+  const r=await intake({path:'GET /report.csv'});
+  Stack.push('fs.readFile');
+  await step({edu:{step:'fs.readFile("/data/report.csv", cb)', desc:'File I/O has no reliable readiness API on most OSes — so libuv submits a work request to its THREAD POOL.',
+    why:'Unlike sockets, regular files always report "ready"; reads can still block on disk. A blocking read is parked on a pool thread instead of the main thread.',
+    comp:'libuv Thread Pool', impact:'Default 4 threads (UV_THREADPOOL_SIZE). The 5th concurrent fs op WAITS.'}, ms:1700, clock:0.2, log:{tag:'uv',msg:'uv_fs_read → uv_queue_work'}});
+  const t=Pool.acquire('fs.read report.csv');
+  fly('#pStack','#pPool','read 4 MB','var(--c-pool)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  await step({edu:{step:'Worker thread blocks on read(2)', desc:'Thread #'+(t+1)+' performs the blocking syscall and fills a Buffer (allocated OUTSIDE the V8 heap). The event loop keeps running.',
+    why:'Blocking is fine on a pool thread — that is what it is for.', comp:'Thread Pool + Buffer', impact:'Buffers count toward RSS but not the V8 heap limit.'}, ms:1400, clock:8, log:{tag:'uv',msg:'pread(fd, buf, 4194304) … blocking on disk'}});
+  Heap.alloc(4,'buf');
+  await step({edu:{step:'Disk responds', desc:'4 MB read into the Buffer in ~8 ms (SSD).', why:'—', comp:'Thread Pool', impact:'—'}, ms:800, clock:0.5});
+  Pool.release(t);
+  MacroQ.push('readFileCb(err,buf)','poll');
+  fly('#pPool','#pMacro','done →','var(--c-pool)');
+  await step({edu:{step:'uv_async_send wakes the loop', desc:'The pool thread signals completion; the callback is queued for the loop to run. JS callbacks NEVER run on pool threads.',
+    why:'All JS executes on the main thread — the pool only does the native work.',
+    comp:'Thread Pool → Poll queue', impact:'Single-threaded JS model preserved: no locks, no data races in your code.'}, ms:1400, clock:0.3, log:{tag:'uv',msg:'uv_async_send → eventfd write'}});
+  Loop.newTick();
+  await Loop.phase('poll',{dwell:500});
+  await MacroQ.runNextOf('poll');
+  Stack.push('readFileCb'); V8.set('execute');
+  await step({edu:{step:'Callback runs with the Buffer', desc:'Your callback finally executes on the main thread with (null, buffer).', why:'—', comp:'Call Stack', impact:'—'}, ms:900, clock:0.4});
+  await drainMicro({eduOnFirst:false});
+  await respond(r, 10);
+  Loop.idle();
+}},
+
+/* ── 11 ────────────────────────────────────────────────────────────────── */
+{ n:11, name:'CPU-Intensive Task — blocked loop', async run(){
+  const r=await intake({path:'GET /fib/45'});
+  Stack.push('fibonacci(45)', true);
+  V8.set('optimize','TurboFan optimizes the hot loop — still blocking!');
+  await step({edu:{step:'fibonacci(45) — synchronous CPU work', desc:'A naive recursive Fibonacci starts crunching ON the call stack. ~3 seconds of pure CPU.',
+    why:'CPU work has no "completion event" to wait for — it occupies the one JS thread until it returns.',
+    comp:'Call Stack / V8', impact:'The event loop CANNOT spin: no timers, no I/O callbacks, no new requests.'}, ms:1300, clock:1, log:{tag:'v8',msg:'fib(45) — ~10⁹ recursive calls'}});
+  Loop.setBlocked(true); Metrics.set('cpu',100);
+  Req.spawn(8);
+  let lag=0;
+  for(let i=0;i<5;i++){
+    await step({edu:{step:`BLOCKED — ${(lag/1000).toFixed(1)}s elapsed`, desc:`${Req.queued.length} requests are piling up in the kernel accept queue. The loop pointer is frozen. Health checks are failing.`,
+      why:'One thread. One stack. fib() is on top of it.',
+      comp:'Event Loop (frozen)', impact:`Loop lag: ${lag} ms. Every queued user feels the FULL remaining wait.`}, ms:850, clock:600});
+    lag+=600; Metrics.set('lag',lag);
+    if(i===2) Req.spawn(6);
+    Internals.log('loop','uv_run starved — JS frame still executing');
+  }
+  await step({edu:{step:'fib returns: 1,134,903,170', desc:'3 seconds later the frame pops. The loop lurches back to life and faces a backlog.',
+    why:'—', comp:'Call Stack', impact:'p99 latency exploded for every concurrent user.'}, ms:1000, clock:1});
+  Loop.setBlocked(false); Metrics.set('cpu',8); Metrics.set('lag',0);
+  await Stack.clear(); V8.set(null);
+  await respond(r, 3004);
+  await step({edu:{step:'Draining the backlog', desc:'Queued requests are now served in a burst.', why:'—', comp:'Event Loop', impact:'See Scenario 12 for the fix.'}, ms:400});
+  Loop.newTick(); await Loop.phase('poll',{dwell:300});
+  while(Req.queued.length){ await quickServe(90); Sim.clock(1); }
+  Metrics.set('thru',0); Loop.idle();
+}},
+
+/* ── 12 ────────────────────────────────────────────────────────────────── */
+{ n:12, name:'Worker Thread — the fix', async run(){
+  const r=await intake({path:'GET /fib/45'});
+  Stack.push('worker.postMessage');
+  await step({edu:{step:'Offload: new Worker("fib.js")', desc:'The same fib(45) is sent to a Worker Thread — a separate OS thread with its OWN V8 isolate, heap, and event loop.',
+    why:'Workers give Node real parallelism for CPU work; data crosses via message passing (structured clone) or SharedArrayBuffer.',
+    comp:'Worker Threads', impact:'Main loop stays free. Spawn cost ~ms — use a worker pool in production.'}, ms:1600, clock:0.5, log:{tag:'uv',msg:'worker_threads: postMessage({n:45})'}});
+  Workers.start(0,'fib(45)');
+  fly('#pStack','#pWorker','fib(45) →','var(--c-worker)');
+  await Stack.clear(); V8.set(null); Loop.idle();
+  Req.spawn(8); Metrics.set('cpu',55);
+  for(let i=1;i<=5;i++){
+    Workers.progress(0,i*20);
+    if(Req.queued.length){ Loop.newTick(); await Loop.phase('poll',{dwell:150}); await quickServe(110); Sim.clock(2); }
+    await step({edu:{step:`Worker crunching (${i*20}%) — loop FREE`, desc:'Compare with Scenario 11: while the worker burns a core, the main loop keeps serving the incoming requests in ~1 ms each.',
+      why:'Two threads, two stacks: CPU work and I/O multiplexing in parallel.',
+      comp:'Worker + Event Loop', impact:'Loop lag ~0 ms. CPU usage is "good busy" on another core.'}, ms:600, clock:580});
+  }
+  while(Req.queued.length){ Loop.newTick(); await Loop.phase('poll',{dwell:120}); await quickServe(90); Sim.clock(1); }
+  Workers.progress(0,100);
+  MacroQ.push("worker 'message' cb",'poll');
+  fly('#pWorker','#pMacro','result ←','var(--c-worker)');
+  await step({edu:{step:"Worker posts result → 'message' event", desc:'The result is structured-cloned back; the message callback is queued like any other event.',
+    why:'Workers integrate with the loop through MessagePort events.', comp:'Poll queue', impact:'—'}, ms:1100, clock:1});
+  Workers.stop(0); Metrics.set('cpu',6);
+  Loop.newTick(); await Loop.phase('poll',{dwell:400});
+  await MacroQ.runNextOf('poll');
+  Stack.push("onMessage"); V8.set('execute'); await Sim.wait(400);
+  await Stack.clear(); V8.set(null);
+  await respond(r, 3005);
+  await step({edu:{step:'Same work, healthy server', desc:'fib(45) still took ~3 s of CPU — but every OTHER request finished in ~1 ms instead of 3000+.', why:'—', comp:'—', impact:'p99 saved.'}, ms:1200});
+  Loop.idle();
+}},
+
+/* ── 13 ────────────────────────────────────────────────────────────────── */
+{ n:13, name:'Memory Leak → heap exhaustion', async run(){
+  await step({edu:{step:'The bug: a global cache that only grows', desc:'const cache = []; every request pushes a closure holding the full request body — and nothing ever removes it.',
+    why:'Reachable ≠ needed. GC frees UNREACHABLE memory; a global array keeps everything reachable forever.',
+    comp:'Memory Heap', impact:'Classic leak shapes: global maps, forgotten listeners, closures over big buffers, unbounded caches.'}, ms:1800});
+  for(let round=1; round<=4; round++){
+    Req.spawn(5);
+    for(let i=0;i<5;i++){ await quickServe(70); Heap.alloc(3,'obj'); Heap.alloc(3,'leak'); Sim.clock(5); }
+    await step({edu:{step:`After ${round*5} requests — heap ${Heap.pct()}%`, desc:'Pink cells are leaked (still referenced by the global array). Purple are normal short-lived allocations.',
+      why:'—', comp:'Memory Heap', impact:'Allocation rate now drives GC frequency up.'}, ms:900});
+    const freed=await GC.run({sweepFrac:0.9});
+    await step({edu:{step:`GC reclaimed only ${Math.round(freed*0.64)} MB`, desc:`The collector marked every leaked cell as live — it cannot free what you still reference. Baseline heap after GC keeps rising: the leak signature.`,
+      why:'A healthy heap returns to the same baseline after each major GC. A rising post-GC floor = leak.',
+      comp:'Garbage Collector', impact:`Post-GC heap: ${Heap.pct()}%. GC pauses get longer as the live set grows.`}, ms:1500});
+  }
+  // final climb to OOM
+  Metrics.set('cpu',85);
+  await step({edu:{step:'GC death spiral', desc:'The heap nears --max-old-space-size. V8 runs back-to-back full GCs that reclaim almost nothing; the process spends most CPU collecting.',
+    why:'Allocation demand exceeds reclaimable space.', comp:'GC + Heap', impact:'Latency spikes, then…'}, ms:1400});
+  while(Heap.pct()<100){ Heap.alloc(4,'leak'); await Sim.wait(160); }
+  Internals.log('mem','FATAL: Reached heap limit; Allocation failed — JavaScript heap out of memory');
+  $('#crashTxt').textContent =
+`<--- Last few GCs --->
+[1:0x5e2a30] 41253 ms: Mark-sweep 63.7 (64.0) -> 63.6 (64.0) MB,
+   612.4 / 0.0 ms (average mu = 0.089) allocation failure
+
+<--- JS stacktrace --->
+FATAL ERROR: Reached heap limit
+ Allocation failed - JavaScript heap out of memory
+ 1: node::Abort()
+ 2: v8::internal::Heap::FatalProcessOutOfMemory()`;
+  $('#crash').style.display='flex';
+  await step({edu:{step:'Process killed: OOM', desc:'V8 aborts the process. In production: pod restarts, dropped connections, and a 3 a.m. page.',
+    why:'—', comp:'Process', impact:'Fixes: bounded caches (LRU + TTL), WeakMap/WeakRef, removeListener, heap snapshots to find retainers.'}, ms:600});
+}},
+
+/* ── 14 ────────────────────────────────────────────────────────────────── */
+{ n:14, name:'1000 Concurrent Requests', async run(){
+  Req.spawn(1000);
+  await step({edu:{step:'Burst: 1000 connections at once', desc:'A traffic spike. All 1000 sockets are accepted and multiplexed by ONE epoll instance — no thread per connection.',
+    why:'This is the architecture Node was built for: many cheap concurrent waits.',
+    comp:'Network + Poll phase', impact:'Memory per idle connection ≈ KBs, not a 1 MB thread stack each.'}, ms:1700, clock:1});
+  const handlerMs=1.2;   // virtual ms of JS per request
+  let processed=0; const total=1000; const t0v=Sim.vtime;
+  Loop.newTick(); await Loop.phase('poll',{dwell:300});
+  while(Req.queued.length){
+    const batch=Math.min(Req.queued.length, 60);
+    for(let i=0;i<batch;i++){ const q=Req.take(); Req.active--; Req.done++; processed++; }
+    Sim.clock(batch*handlerMs);
+    Req.stats(); Req.render();
+    const elapsed=Sim.vtime-t0v;
+    Metrics.set('thru', Math.round(processed/(elapsed/1000)));
+    Metrics.set('lag', Math.round(Req.queued.length*handlerMs));
+    Metrics.set('cpu', Math.min(98, 30+Math.round(60*Req.queued.length/total)));
+    Metrics.set('resp', Math.round(processed*handlerMs - 0 + handlerMs));
+    Stack.push('handler'); V8.set('execute');
+    flash('#pStack',150);
+    await Sim.wait(330);
+    await Stack.pop();
+    if(processed===120) await step({edu:{step:'Head-of-line economics', desc:`Each request needs ~${handlerMs} ms of JS. Request #1000 must wait for the 999 in front of it: ~${Math.round(999*handlerMs)} ms of queueing delay even though "nothing is slow".`,
+      why:'Single-threaded throughput = 1000/handlerMs req/s, hard ceiling per process.',
+      comp:'Event Loop', impact:'Loop lag = queue_length × per-request CPU. Watch it fall as the queue drains.'}, ms:1300});
+    if(processed===480) await step({edu:{step:'Half-way — steady state', desc:`Throughput ≈ ${Math.round(1000/handlerMs)} req/s. p50 latency is fine; p99 (the back of the queue) is ~1 s.`,
+      why:'Tail latency under burst is a queueing problem, not a code problem.',
+      comp:'Metrics', impact:'Scaling answer: cluster module / more processes — one loop per core.'}, ms:1300});
+  }
+  V8.set(null);
+  Metrics.set('lag',0); Metrics.set('cpu',4); Metrics.set('queue',0);
+  await step({edu:{step:'1000 requests drained', desc:`All served in ~${Math.round(Sim.vtime-t0v)} virtual ms by one thread. First requests saw ~2 ms; the last saw ~${Math.round(total*handlerMs)} ms.`,
+    why:'—', comp:'—', impact:'Keep handlers tiny; offload CPU; scale horizontally with cluster/pm2 (one process per core).'}, ms:1800});
+  Loop.idle();
+}},
+];
+
+/* extra: stream demo wired into scenario 10's panel is available any time */
+Scenarios.splice(10,0,{ n:'S', name:'Stream Pipeline (bonus)', async run(){
+  const r=await intake({path:'GET /video.mp4'});
+  await step({edu:{step:'fs.createReadStream(...).pipe(gzip).pipe(res)', desc:'Instead of buffering the whole file, data flows in 16 KB chunks through a pipeline.',
+    why:'Streams bound memory: only highWaterMark bytes are in flight per stage, regardless of file size.',
+    comp:'Streams', impact:'A 10 GB file is served with ~64 KB of memory.'}, ms:1500, clock:0.5});
+  await Stack.clear(); V8.set(null);
+  const t=Pool.acquire('fs chunk reads');
+  await Streams.flow(5,'video.mp4');
+  Pool.release(t);
+  await step({edu:{step:'Backpressure', desc:'If the client socket is slower than the disk, the Writable buffer fills; write() returns false and the Readable PAUSES until "drain".',
+    why:'Pull-based flow control prevents fast producers from ballooning memory.',
+    comp:'Streams', impact:'No backpressure handling = the most common Node memory blowup.'}, ms:1600});
+  await respond(r, 45);
+  Loop.idle();
+}});
+
+/* ============================================================================
+   BOOT
+   ============================================================================ */
+function boot(){
+  Loop.build(); Pool.build(); Workers.build(); Heap.build();
+  const strip=$('#scenarios');
+  Scenarios.forEach(s=>{
+    const b=document.createElement('button');
+    b.innerHTML=`<span class="n">${s.n}</span>${s.name}`;
+    b.onclick=()=>Sim.runScenario(s.name, s.run, b);
+    strip.appendChild(b);
+  });
+  Metrics.resetAll();
+  Edu.show({step:'Welcome', desc:'This simulator walks through what actually happens inside Node.js — V8, libuv, the event loop, queues, the thread pool, GC. Pick a scenario above; use ⚙ for libuv-level internals.',
+    why:'Mental models beat memorized rules.', comp:'—', impact:'—'});
+}
+boot();
+</script>
+</body>
+</html>
+
