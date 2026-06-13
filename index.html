@@ -9,16 +9,7 @@
    DESIGN TOKENS — observability-console dark theme
    ============================================================ */
 :root{
-  --bg:#0a0d13;            /* page background */
-  --panel:#10151f;         /* panel surface */
-  --panel-2:#151c29;       /* nested surface */
-  --line:#1e2737;          /* hairline borders */
-  --line-2:#2a3650;
-  --text:#d7dee9;
-  --dim:#8593a8;
-  --faint:#5a6678;
-
-  /* component identity colors */
+  /* ---- shared component identity colors (constant across themes) ---- */
   --c-req:#62d2e0;         /* incoming requests / network  */
   --c-stack:#ffb454;       /* call stack                   */
   --c-v8:#f3d56b;          /* v8 engine                    */
@@ -40,12 +31,44 @@
   --mono:ui-monospace,'SF Mono','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
   --sans:-apple-system,'Segoe UI',Inter,Roboto,'Helvetica Neue',sans-serif;
   --r:8px;
+
+  /* ---- surface tokens: default = Midnight (overridden per theme) ---- */
+  --bg:#0a0d13; --panel:#10151f; --panel-2:#151c29;
+  --line:#1e2737; --line-2:#2a3650;
+  --text:#d7dee9; --dim:#8593a8; --faint:#5a6678;
+  --sel:#27405f; --scroll:#243049; --header:#0c111a; --strip:#0b0f17; --logbg:#080b11; --track:#1a2335; --segidle:#1c2434;
+}
+/* Theme: Midnight (deep navy, default) */
+body[data-theme="midnight"]{}
+/* Theme: Slate (neutral graphite, lower saturation) */
+body[data-theme="slate"]{
+  --bg:#16181d; --panel:#1d2026; --panel-2:#23272f;
+  --line:#2c313b; --line-2:#3a414e;
+  --text:#dfe3ea; --dim:#969ca8; --faint:#6b7280;
+  --sel:#37414f; --scroll:#333a45; --header:#191c22; --strip:#181b20; --logbg:#121419; --track:#2a313c; --segidle:#2c333f;
+}
+/* Theme: Aurora (light / daylight) */
+body[data-theme="aurora"]{
+  --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fb;
+  --line:#dde3ee; --line-2:#c3ccdc;
+  --text:#1f2733; --dim:#5b6675; --faint:#8b97a8;
+  --sel:#cfe0ff; --scroll:#c7d0de; --header:#ffffff; --strip:#f4f6fb; --logbg:#f7f9fc; --track:#dde3ee; --segidle:#d2dae8;
+  /* darken a couple of identity colors that were tuned for dark bg */
+  --c-v8:#caa400; --c-stack:#d98612;
+}
+/* Theme: Matrix (high-contrast terminal green) */
+body[data-theme="matrix"]{
+  --bg:#000800; --panel:#04140a; --panel-2:#061c0e;
+  --line:#0c3318; --line-2:#15532a;
+  --text:#b7f7c4; --dim:#5fae74; --faint:#3c7a50;
+  --sel:#0d4a23; --scroll:#124f27; --header:#031006; --strip:#03100a; --logbg:#000600; --track:#0c3318; --segidle:#0c3318;
+  --c-loop:#39ff7a; --c-req:#52e0ff; --c-v8:#eaff5a; --c-ok:#39ff7a;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px}
-::selection{background:#27405f}
+::selection{background:var(--sel)}
 ::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:#243049;border-radius:4px}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:4px}
 ::-webkit-scrollbar-track{background:transparent}
 
 /* ============================================================
@@ -55,7 +78,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 
 header{
   display:flex;align-items:center;gap:14px;padding:8px 14px;
-  border-bottom:1px solid var(--line);background:#0c111a;flex:0 0 auto;
+  border-bottom:1px solid var(--line);background:var(--header);flex:0 0 auto;
 }
 header .logo{display:flex;align-items:center;gap:9px;font-family:var(--mono)}
 header .logo .hex{width:20px;height:20px;color:var(--c-loop)}
@@ -89,7 +112,7 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
    ============================================================ */
 #scenarios{
   display:flex;gap:6px;padding:7px 14px;border-bottom:1px solid var(--line);
-  overflow-x:auto;flex:0 0 auto;background:#0b0f17;
+  overflow-x:auto;flex:0 0 auto;background:var(--strip);
 }
 #scenarios button{flex:0 0 auto;font-size:11px;padding:4px 9px;color:var(--dim)}
 #scenarios button .n{color:var(--faint);margin-right:5px}
@@ -193,7 +216,7 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
    ============================================================ */
 #loopWrap{display:flex;align-items:center;gap:10px;height:100%}
 #loopSvg{flex:0 0 auto}
-.seg{fill:none;stroke:#1c2434;stroke-width:17;transition:stroke .25s;cursor:default}
+.seg{fill:none;stroke:var(--segidle);stroke-width:17;transition:stroke .25s;cursor:default}
 .seg.on{stroke:var(--c-loop);filter:drop-shadow(0 0 6px var(--c-loop))}
 .seg.blocked{stroke:var(--bad);filter:drop-shadow(0 0 6px var(--bad))}
 .seglbl{font-family:var(--mono);font-size:7.5px;fill:var(--faint);text-anchor:middle}
@@ -241,7 +264,7 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
 .thread.wbusy{border-color:var(--c-worker);color:var(--c-worker);background:#13200e}
 .thread.wbusy .lamp{background:var(--c-worker);box-shadow:0 0 8px var(--c-worker);animation:blink .8s infinite}
 .thread.wbusy .job{color:var(--c-worker)}
-.progress{height:3px;background:#1a2335;border-radius:2px;overflow:hidden;margin-top:3px}
+.progress{height:3px;background:var(--track);border-radius:2px;overflow:hidden;margin-top:3px}
 .progress>i{display:block;height:100%;background:var(--c-pool);width:0%;transition:width .2s linear}
 
 /* ============================================================
@@ -251,7 +274,7 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
 .svcrow .lamp{width:8px;height:8px;border-radius:50%;background:#26314a}
 .svcrow.on{color:var(--c-db)}
 .svcrow.on .lamp{background:var(--c-db);box-shadow:0 0 8px var(--c-db);animation:blink .7s infinite}
-.latbar{height:4px;background:#1a2335;border-radius:2px;overflow:hidden;margin:4px 0 8px}
+.latbar{height:4px;background:var(--track);border-radius:2px;overflow:hidden;margin:4px 0 8px}
 .latbar>i{display:block;height:100%;width:0%;background:var(--c-db);transition:width .1s linear}
 #redisBody .latbar>i{background:var(--c-redis)}
 .kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);padding:2px 0}
@@ -276,12 +299,12 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
    HEAP + GC
    ============================================================ */
 #heapGrid{display:grid;grid-template-columns:repeat(20,1fr);gap:2px}
-.cell{aspect-ratio:1;border-radius:2px;background:#161e2e;transition:all .25s}
+.cell{aspect-ratio:1;border-radius:2px;background:var(--track);transition:all .25s}
 .cell.obj{background:#8a7ff0}.cell.arr{background:#5b8af5}.cell.buf{background:#46b3a9}
 .cell.leak{background:#c4426b}
 .cell.marked{outline:1.5px solid #f78c6c;outline-offset:-1.5px}
 .cell.sweeping{background:#3a2a20;outline:none}
-#heapBar{height:6px;background:#1a2335;border-radius:3px;overflow:hidden;margin-top:7px}
+#heapBar{height:6px;background:var(--track);border-radius:3px;overflow:hidden;margin-top:7px}
 #heapBar>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--c-heap),#c4426b);transition:width .25s}
 #heapKv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px}
 #gcPhases{display:flex;gap:4px;margin-top:7px}
@@ -318,7 +341,7 @@ label.hlabel{font-size:10.5px;color:var(--dim);font-family:var(--mono);text-tran
 /* ============================================================
    INTERNALS LOG (advanced mode)
    ============================================================ */
-#internals{display:none;border-top:1px solid var(--line);flex:0 0 110px;background:#080b11;overflow:auto;padding:6px 12px;font-family:var(--mono);font-size:10px;line-height:1.6}
+#internals{display:none;border-top:1px solid var(--line);flex:0 0 110px;background:var(--logbg);overflow:auto;padding:6px 12px;font-family:var(--mono);font-size:10px;line-height:1.6}
 body.advanced #internals{display:block}
 #internals .il{color:var(--dim);white-space:pre}
 #internals .il .t{color:var(--faint)}
@@ -382,10 +405,23 @@ body.advanced #internals{display:block}
         <option value="2">2×</option>
         <option value="4">4×</option>
       </select>
+      <button id="prevBtn" onclick="Sim.prev()" title="previous step">⏮ prev</button>
       <button id="pauseBtn" onclick="Sim.togglePause()">⏸ pause</button>
+      <button id="nextBtn" onclick="Sim.next()" title="next step">⏭ next</button>
+      <span id="stepBadge" style="font-family:var(--mono);font-size:10px;color:var(--dim);display:none"></span>
       <button class="danger" onclick="Sim.reset()">↺ reset</button>
     </div>
     <div class="spacer"></div>
+    <div class="hgroup">
+      <label class="hlabel" for="themeSel">Theme</label>
+      <select id="themeSel" onchange="setTheme(this.value)">
+        <option value="midnight">Midnight</option>
+        <option value="slate">Slate</option>
+        <option value="aurora">Aurora (light)</option>
+        <option value="matrix">Matrix</option>
+      </select>
+    </div>
+    <div class="hsep"></div>
     <button id="advBtn" class="toggle" onclick="toggleAdvanced()">⚙ show internal details</button>
   </header>
 
@@ -621,6 +657,8 @@ const $$ = s => [...document.querySelectorAll(s)];
 const Sim = {
   speed: 1, paused: false, runId: 0, vtime: 0, running: false,
   _gate: null,
+  /* step navigation */
+  stepMode: false, history: [], cursor: -1, _stepGate: null,
 
   // real-time delay scaled by speed; respects pause + abort
   async wait(ms){
@@ -637,25 +675,96 @@ const Sim = {
   },
   _pauseGate(){ return new Promise(r => { this._gate = r; }); },
   togglePause(){
+    if (this.stepMode){ this.exitStepMode(); return; }   // ▶ play: leave manual stepping
     this.paused = !this.paused;
     $('#pauseBtn').textContent = this.paused ? '▶ resume' : '⏸ pause';
     if (!this.paused && this._gate){ this._gate(); this._gate = null; }
   },
+
+  /* ---- manual step navigation ----------------------------------------
+     Every step() records a full UI snapshot (a "checkpoint").
+     ⏭ next : replay forward through history, or advance the live run by
+              exactly one step (entering step mode if it was playing).
+     ⏮ prev : rewind to the previous snapshot (view-only time travel).
+     ▶ play : jump back to the live frontier and resume normal playback.
+     The live coroutine only ever resumes from the frontier, so component
+     state and the DOM can never diverge.                                */
+  releaseGate(){ if (this._stepGate){ const g=this._stepGate; this._stepGate=null; g(); } },
+  async checkpoint(){
+    const id = this.runId;
+    this.history.push(Snap.capture());
+    this.cursor = this.history.length - 1;
+    this.updateBadge();
+    if (this.stepMode){
+      this.updateBadge();
+      await new Promise(r => { this._stepGate = r; });
+      if (id !== this.runId) throw new Error('aborted');
+    }
+  },
+  next(){
+    if (this.cursor < this.history.length - 1){          // replaying recorded history
+      this.cursor++; Snap.restore(this.history[this.cursor]); this.updateBadge(); return;
+    }
+    if (this._stepGate){ this.releaseGate(); return; }   // at frontier: run one live step
+    if (this.running) this.enterStepMode();              // playing → halt at next step
+  },
+  prev(){
+    if (this.running && !this._stepGate){ this.enterStepMode(); return; } // halts shortly
+    if (this.cursor > 0){
+      this.enterStepMode();
+      this.cursor--; Snap.restore(this.history[this.cursor]); this.updateBadge();
+    }
+  },
+  enterStepMode(){ this.stepMode = true; $('#pauseBtn').textContent = '▶ play'; this.updateBadge(); },
+  exitStepMode(){
+    this.stepMode = false; $('#pauseBtn').textContent = '⏸ pause';
+    if (this.cursor < this.history.length - 1){          // fast-forward to live frontier
+      this.cursor = this.history.length - 1;
+      Snap.restore(this.history[this.cursor]);
+    }
+    this.updateBadge(); this.releaseGate();
+  },
+  updateBadge(){
+    const b = $('#stepBadge'), n = this.history.length;
+    if (!n){ b.style.display = 'none'; }
+    else {
+      b.style.display = 'inline';
+      const hist = this.cursor < n - 1;
+      b.textContent = `step ${this.cursor + 1}/${n}` +
+        (hist ? ' · history (⏭ to replay)' : (this._stepGate ? ' · ⏭ to advance' : ''));
+      b.style.color = hist ? 'var(--warn)' : 'var(--dim)';
+    }
+    $('#prevBtn').disabled = this.cursor <= 0;
+    $('#nextBtn').disabled = !this.running && this.cursor >= n - 1;
+  },
   clock(ms){ this.vtime += ms; Timeline.tick(this.vtime); },
 
   async runScenario(name, fn, btn){
-    this.runId++;                       // abort anything in flight
+    this.runId++; this.releaseGate();   // abort anything in flight (wake a parked step)
     await new Promise(r=>setTimeout(r,60));
     softReset();
     $$('#scenarios button').forEach(b=>b.classList.remove('active'));
     if (btn) btn.classList.add('active');
     this.running = true; this.vtime = 0; Timeline.reset();
+    this.history = []; this.cursor = -1; this.updateBadge();
     const id = this.runId;
-    try { await fn(); Edu.show({step:'Scenario complete', desc:`"${name}" finished. Replay it or pick another scenario.`, why:'—', comp:'—', impact:'—'}); }
+    try {
+      await fn();
+      while (Req.queued.length) await serveQueued();   // drain anything spawned mid-run
+      Edu.show({step:'Scenario complete', desc:`"${name}" finished. Use ⏮/⏭ to review the steps, replay it, or pick another scenario.`, why:'—', comp:'—', impact:'—'});
+      this.history.push(Snap.capture()); this.cursor = this.history.length - 1;
+    }
     catch(e){ if (e.message!=='aborted') console.error(e); }
     if (id===this.runId) this.running = false;
+    this.updateBadge();
   },
-  reset(){ this.runId++; this.paused=false; $('#pauseBtn').textContent='⏸ pause'; if(this._gate){this._gate();this._gate=null;} hardReset(); }
+  reset(){
+    this.runId++; this.paused=false; this.stepMode=false;
+    this.history=[]; this.cursor=-1; this.releaseGate();
+    $('#pauseBtn').textContent='⏸ pause';
+    if(this._gate){this._gate();this._gate=null;}
+    hardReset(); this.updateBadge();
+  }
 };
 
 /* convenience: show edu card, log, advance virtual clock, real-wait */
@@ -664,7 +773,8 @@ async function step(o){
   if (o.log) Internals.log(o.log.tag||'loop', o.log.msg);
   if (o.t !== undefined) Timeline.mark(o.t, o.tl || (o.edu&&o.edu.step) || '');
   if (o.clock) Sim.clock(o.clock);
-  await Sim.wait(o.ms ?? 700);
+  await Sim.checkpoint();                                 // snapshot + manual-step gate
+  await Sim.wait(Sim.stepMode ? 120 : (o.ms ?? 700));     // user paces reading in step mode
 }
 
 /* ----------------------------------------------------------------------------
@@ -758,6 +868,8 @@ const Req = {
       why:'Node accepts connections in the poll phase; work is processed one callback at a time on a single JS thread.',
       comp:'Network Layer → Poll phase', impact: n>=100?'Large bursts build queue depth → latency grows for every request behind the head of the queue.':'Negligible at this volume.'});
     this.stats();
+    if (!Sim.running)                                    // idle server: process the burst now
+      Sim.runScenario(`Burst — ${n} request${n>1?'s':''}`, serveQueued, null);
   },
   take(){ const r=this.queued.shift(); if(!r) return null; this.active++; this.render(); this.stats(); return r; },
   complete(rt){ this.active=Math.max(0,this.active-1); this.done++; this.stats(); if(rt!==undefined) Metrics.set('resp',rt); },
@@ -1130,6 +1242,26 @@ const Streams = {
 };
 
 /* ----------------------------------------------------------------------------
+   Snap — full-UI snapshots for ⏮/⏭ step navigation
+   The whole visual state lives in #main (+ the internals log), so a snapshot
+   is just captured markup. Restoring replaces the markup and re-binds the few
+   cached element references.
+---------------------------------------------------------------------------- */
+const Snap = {
+  capture(){ return { main: $('#main').innerHTML, internals: Internals.el.innerHTML }; },
+  restore(s){
+    $('#main').innerHTML = s.main;
+    Internals.el.innerHTML = s.internals;
+    rebindEls();
+  }
+};
+function rebindEls(){
+  Req.el = $('#reqList');   Stack.el = $('#stackWrap');
+  TickQ.el = $('#tickQ');   MicroQ.el = $('#microQ');  MacroQ.el = $('#macroQ');
+  Heap.grid = $('#heapGrid'); Timeline.inner = $('#tlInner');
+}
+
+/* ----------------------------------------------------------------------------
    Reset plumbing
 ---------------------------------------------------------------------------- */
 function softReset(){ // between scenarios — keep counters like done requests
@@ -1149,6 +1281,12 @@ function toggleAdvanced(){
   const on=document.body.classList.contains('advanced');
   $('#advBtn').classList.toggle('on',on);
   $('#advBtn').textContent=on?'⚙ hide internal details':'⚙ show internal details';
+}
+/* theme switching — surface tokens swap; component identity colors stay constant.
+   Held in memory for the session (browser storage isn't available in this sandbox). */
+function setTheme(name){
+  document.body.setAttribute('data-theme', name);
+  const sel=$('#themeSel'); if(sel) sel.value=name;
 }
 </script>
 <script>
@@ -1214,6 +1352,61 @@ async function quickServe(ms=120){
   await Sim.wait(ms);
   await Stack.pop(); V8.set(null);
   Req.complete(Math.round(Sim.vtime - 0));
+}
+
+/* generic burst server: drains whatever is in the incoming queue.
+   Small bursts (≤10) are narrated per request; large bursts run batched with
+   live metrics (throughput, loop lag, CPU). Used by the +N load buttons and
+   to drain leftovers after any scenario. */
+async function serveQueued(){
+  const total = Req.queued.length; if (!total) return;
+  const per = 1.2;                                       // virtual ms of JS per request
+  await step({edu:{step:`Serving ${total} queued request${total>1?'s':''}`,
+    desc: total>=100 ? 'A traffic burst hit the server. All connections are multiplexed by one epoll instance; the loop will drain them one callback at a time.'
+                     : 'The event loop picks these up from the poll phase, one at a time, running each handler to completion.',
+    why:'One JS thread serves the queue sequentially; Node\'s concurrency comes from overlapping I/O waits, not parallel handlers.',
+    comp:'Event Loop — Poll phase',
+    impact: total>1 ? `Head-of-line queueing: the last request waits ~${Math.round((total-1)*per)} ms before its handler even starts.` : 'Single request — negligible queueing.'}, ms:1100});
+  const t0 = Sim.vtime; let processed = 0;
+  Loop.newTick(); await Loop.phase('poll',{dwell:300});
+  if (total <= 10){
+    while (Req.queued.length){
+      const r = Req.take(); Req.markProcessing();
+      Stack.push('handler'); V8.set('execute');
+      Sim.clock(per);
+      await step({edu:{step:`Request #${r.id} — handler on stack`,
+        desc:`handler(req,res) runs ~${per} ms of synchronous JS, then res.end() writes the response back to the socket.`,
+        why:'Each callback runs to completion before the loop touches the next one.',
+        comp:'Call Stack', impact: Req.queued.length ? `${Req.queued.length} request${Req.queued.length>1?'s':''} still waiting behind it.` : 'Queue empty after this one.'}, ms:520});
+      await Stack.pop(); V8.set(null);
+      processed++;
+      Req.complete(Math.max(1, Math.round(Sim.vtime - t0)));
+      Metrics.set('thru', Math.round(processed / Math.max(Sim.vtime - t0, 1) * 1000));
+      Timeline.mark(Sim.vtime, '#'+r.id+' ✓');
+    }
+  } else {
+    while (Req.queued.length){
+      const batch = Math.min(Req.queued.length, Math.max(5, Math.ceil(total/16)));
+      for (let i=0;i<batch;i++){ Req.take(); Req.active--; Req.done++; processed++; }
+      Sim.clock(batch*per); Req.stats(); Req.render();
+      const elapsed = Math.max(Sim.vtime - t0, 1);
+      Metrics.set('thru', Math.round(processed/elapsed*1000));
+      Metrics.set('lag',  Math.round(Req.queued.length*per));
+      Metrics.set('cpu',  Math.min(98, 25 + Math.round(70*Req.queued.length/total)));
+      Metrics.set('resp', Math.round(processed*per));
+      Stack.push('handler'); V8.set('execute'); flash('#pStack',150);
+      await Sim.wait(300); await Stack.pop();
+      if (processed===Math.ceil(total/3) || processed===Math.ceil(2*total/3))
+        await step({edu:{step:`${processed}/${total} served — queue: ${Req.queued.length}`,
+          desc:`Throughput ≈ ${Math.round(1000/per)} req/s for this process; loop lag = queue length × per-request CPU.`,
+          why:'Single-threaded throughput is a hard ceiling per process.',
+          comp:'Event Loop + Metrics', impact:'Watch loop lag fall as the queue drains.'}, ms:700});
+    }
+  }
+  V8.set(null); Metrics.set('lag',0); Metrics.set('cpu',3);
+  await step({edu:{step:'Queue drained', desc:`${processed} request${processed>1?'s':''} served in ~${Math.round(Sim.vtime-t0)} virtual ms.`,
+    why:'—', comp:'—', impact: total>=100 ? 'To go faster: keep handlers tiny, offload CPU, and scale across cores with cluster — one event loop per process.' : '—'}, ms:900});
+  Loop.idle();
 }
 
 /* ============================================================================
@@ -1661,6 +1854,7 @@ Scenarios.splice(10,0,{ n:'S', name:'Stream Pipeline (bonus)', async run(){
    BOOT
    ============================================================================ */
 function boot(){
+  setTheme('midnight');
   Loop.build(); Pool.build(); Workers.build(); Heap.build();
   const strip=$('#scenarios');
   Scenarios.forEach(s=>{
@@ -1669,9 +1863,16 @@ function boot(){
     b.onclick=()=>Sim.runScenario(s.name, s.run, b);
     strip.appendChild(b);
   });
-  Metrics.resetAll();
+  Metrics.resetAll(); Sim.updateBadge();
+  // keyboard navigation: ← prev · → next · space play/pause
+  window.addEventListener('keydown', e=>{
+    if (['INPUT','SELECT','TEXTAREA'].includes((e.target.tagName||''))) return;
+    if (e.key==='ArrowRight'){ e.preventDefault(); Sim.next(); }
+    else if (e.key==='ArrowLeft'){ e.preventDefault(); Sim.prev(); }
+    else if (e.key===' '){ e.preventDefault(); Sim.togglePause(); }
+  });
   Edu.show({step:'Welcome', desc:'This simulator walks through what actually happens inside Node.js — V8, libuv, the event loop, queues, the thread pool, GC. Pick a scenario above; use ⚙ for libuv-level internals.',
-    why:'Mental models beat memorized rules.', comp:'—', impact:'—'});
+    why:'Step through any run with ⏮ / ⏭ (or ← / → keys); space toggles play/pause. The +N load buttons fire a live burst.', comp:'—', impact:'Mental models beat memorized rules.'});
 }
 boot();
 </script>
